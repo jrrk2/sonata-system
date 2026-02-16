@@ -106,6 +106,8 @@ module xbar_main (
   input  tlul_pkg::tl_d2h_t tl_dbg_dev_i,
   output tlul_pkg::tl_h2d_t tl_rv_plic_o,
   input  tlul_pkg::tl_d2h_t tl_rv_plic_i,
+  output tlul_pkg::tl_h2d_t tl_sd_o,
+  input  tlul_pkg::tl_d2h_t tl_sd_i,
 
   input prim_mubi_pkg::mubi4_t scanmode_i
 );
@@ -122,8 +124,8 @@ module xbar_main (
   tl_d2h_t tl_s1n_26_us_d2h ;
 
 
-  tl_h2d_t tl_s1n_26_ds_h2d [24];
-  tl_d2h_t tl_s1n_26_ds_d2h [24];
+  tl_h2d_t tl_s1n_26_ds_h2d [25];
+  tl_d2h_t tl_s1n_26_ds_d2h [25];
 
   // Create steering signal
   logic [4:0] dev_sel_s1n_26;
@@ -238,6 +240,9 @@ module xbar_main (
   assign tl_rv_plic_o = tl_s1n_26_ds_h2d[23];
   assign tl_s1n_26_ds_d2h[23] = tl_rv_plic_i;
 
+  assign tl_sd_o = tl_s1n_26_ds_h2d[24];
+  assign tl_s1n_26_ds_d2h[24] = tl_sd_i;
+
   assign tl_sm1_27_us_h2d[1] = tl_s1n_31_ds_h2d[0];
   assign tl_s1n_31_ds_d2h[0] = tl_sm1_27_us_d2h[1];
 
@@ -267,7 +272,7 @@ module xbar_main (
 
   always_comb begin
     // default steering to generate error response if address is not within the range
-    dev_sel_s1n_26 = 5'd24;
+    dev_sel_s1n_26 = 5'd25;
     if ((tl_s1n_26_us_h2d.a_address &
          ~(ADDR_MASK_SRAM)) == ADDR_SPACE_SRAM) begin
       dev_sel_s1n_26 = 5'd0;
@@ -363,6 +368,10 @@ module xbar_main (
     end else if ((tl_s1n_26_us_h2d.a_address &
                   ~(ADDR_MASK_RV_PLIC)) == ADDR_SPACE_RV_PLIC) begin
       dev_sel_s1n_26 = 5'd23;
+
+    end else if ((tl_s1n_26_us_h2d.a_address &
+                  ~(ADDR_MASK_SD)) == ADDR_SPACE_SD) begin
+      dev_sel_s1n_26 = 5'd24;
 end
   end
 
@@ -388,11 +397,11 @@ end
   tlul_socket_1n #(
     .HReqDepth (4'h0),
     .HRspDepth (4'h0),
-    .DReqPass  (24'h781d47),
-    .DRspPass  (24'h781d47),
-    .DReqDepth (96'h100001111110001010111000),
-    .DRspDepth (96'h100001111110001010111000),
-    .N         (24)
+    .DReqPass  (25'h1781d47),
+    .DRspPass  (25'h1781d47),
+    .DReqDepth (100'h1100001111110001010111000),
+    .DRspDepth (100'h1100001111110001010111000),
+    .N         (25)
   ) u_s1n_26 (
     .clk_i        (clk_sys_i),
     .rst_ni       (rst_sys_ni),

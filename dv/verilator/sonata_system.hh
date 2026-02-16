@@ -5,6 +5,10 @@
 #include "verilated_toplevel.h"
 #include "verilator_memutil.h"
 
+#ifdef ETH_MAC_MODEL
+#include "dhcp_server_extension.h"
+#endif
+
 class SonataSystem {
  public:
   SonataSystem(const char *ram_hier_path, int ram_size_words,
@@ -18,7 +22,9 @@ class SonataSystem {
   VerilatorMemUtil _memutil;
   MemArea _ram;
   MemArea _hyperram;
-
+#ifdef ETH_MAC_MODEL
+  DHCPServerExtension _dhcp_server_ext;
+#endif
   virtual int Setup(int argc, char **argv, bool &exit_app);
   virtual void Run();
   virtual bool Finish();

@@ -28,7 +28,7 @@ module top_verilator #(
   localparam int unsigned SysClkFreq = 40_000_000;
   // HyperRAM clock frequency.
   localparam int unsigned HyperRAMClkFreq  = 100_000_000;
-  localparam int unsigned BaudRate   = 921_600;
+  localparam int unsigned BaudRate   = 115_200;
   // Number of CHERI error LEDs.
   localparam int unsigned CheriErrWidth = 9;
   // The symbolic file descriptors are presently unknown to Verilator
@@ -342,6 +342,10 @@ module top_verilator #(
   wire [7:0] user_sw_n = '0;
   wire [2:0] sel_sw_n = '0;
 
+`ifdef ETH_MAC_MODEL   
+   wire	     ethmac_cipo, ethmac_copi, ethmac_cs, ethmac_irq, ethmac_rst, ethmac_sclk;
+`endif
+ 
   // Instantiating the Sonata System.
   sonata_system #(
     .CheriErrWidth   ( CheriErrWidth   ),
@@ -397,12 +401,21 @@ module top_verilator #(
     .lcd_rst_o               (lcd_rst),
     .lcd_backlight_o         (lcd_backlight),
 
+`ifdef ETH_MAC_MODEL   
+    .ethmac_copi_o           (ethmac_copi),
+    .ethmac_cipo_i           (ethmac_cipo),
+    .ethmac_sclk_o           (ethmac_sclk),
+    .ethmac_cs_o             (ethmac_cs),
+    .ethmac_rst_o            (ethmac_rst),
+    .ethmac_irq_ni           (ethmac_irq), // Interrupt for Ethernet is out of band
+`else
     .ethmac_copi_o           (),
     .ethmac_cipo_i           (),
     .ethmac_sclk_o           (),
     .ethmac_cs_o             (),
     .ethmac_rst_o            (),
-    .ethmac_irq_ni           (1'b1), // Interrupt for Ethernet is out of band
+    .ethmac_irq_ni           (), // Interrupt for Ethernet is out of band
+`endif
 
     // CHERI signals
     .cheri_en_i     (cheri_en ),
@@ -692,6 +705,56 @@ module top_verilator #(
     .dq     (hyperram_dq)
   );
 `endif
+
+`ifdef ETH_MAC_MODEL   
+  // KSZ8851SNL Ethernet MAC Model
+  // RMII RX signals for packet injection
+  reg [1:0] rmii_rxd /* verilator public */;
+  reg       rmii_rx_dv /* verilator public */;
+  reg       rmii_rx_er /* verilator public */;
+  wire [1:0] rmii_txd /* verilator public */;
+  wire       rmii_tx_en /* verilator public */;
+  wire [7:0] gmii_txd_mon /* verilator public */;
+  wire       gmii_tx_en_mon /* verilator public */;
+  wire       gmii_tx_er_mon /* verilator public */;
+
+  // Note: The MAC model needs a 25MHz clock; for now using clk_i (40MHz)
+  // TODO: Generate proper 25MHz clock or adjust model
+  ksz8851snl_mac_model u_eth_mac (
+    .csn        (ethmac_cs),       // Active low - direct connection
+    .sclk       (ethmac_sclk),
+    .si         (ethmac_copi),
+    .so         (ethmac_cipo),
+    .rstn       (ethmac_rst),
+    .clk_25mhz  (clk_i),           // Using system clock for now
+    .intrn      (ethmac_irq),      // Active low interrupt
+    // RMII interface for packet injection
+    .rxd        (rmii_rxd),
+    .rx_dv      (rmii_rx_dv),
+    .rx_er      (rmii_rx_er),
+    .txd        (rmii_txd),
+    .tx_en      (rmii_tx_en),
+    // Debug outputs (unused in integration)
+    .chip_state (),
+    .rx_state_mon (),
+    .tx_state_mon (),
+    .rx_byte_count (),
+    .tx_byte_count (),
+    .rx_error_bad_frame (),
+    .rx_error_bad_fcs (),
+    .cmd_byte0 (),
+    .cmd_byte1 (),
+    .read_pulse (),
+    .write_pulse (),
+    // GMII monitor outputs for DHCP server
+    .gmii_txd_mon (gmii_txd_mon),
+    .gmii_tx_en_mon (gmii_tx_en_mon),
+    .gmii_tx_er_mon (gmii_tx_er_mon)
+  );
+`endif //  `ifdef ETH_MAC_MODEL
+   
+  // ARP and DHCP packet injection now handled by C++ extension
+  // See dhcp_server_extension.h for implementation
 
   export "DPI-C" function mhpmcounter_get;
 

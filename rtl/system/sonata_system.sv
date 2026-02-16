@@ -105,6 +105,16 @@ module sonata_system
   output wire                      rs485_rx_enable_o,
   output wire                      rs485_tx_enable_o,
 
+  // MicroSD native SD interface
+  output logic                     microsd_clk_o,
+  input  logic                     microsd_cmd_i,
+  output logic                     microsd_cmd_o,
+  output logic                     microsd_cmd_oe_o,
+  input  logic [3:0]               microsd_dat_i,
+  output logic [3:0]               microsd_dat_o,
+  output logic                     microsd_dat_oe_o,
+  input  logic                     microsd_detect_i,
+
   // Pin Signals
   input  sonata_in_pins_t    in_from_pins_i,
   output sonata_out_pins_t   out_to_pins_o,
@@ -118,7 +128,7 @@ module sonata_system
 
   localparam int unsigned MemSize       = 128 * 1024; // 128 KiB
   localparam int unsigned SRAMAddrWidth = $clog2(MemSize);
-  localparam int unsigned HyperRAMSize  = 1024 * 1024; // 1 MiB
+  localparam int unsigned HyperRAMSize  = 8 * 1024 * 1024; // 8 MiB
   localparam int unsigned PwmCtrSize    = 8;
   localparam int unsigned BusAddrWidth  = 32;
   localparam int unsigned BusByteEnable = 4;
@@ -175,6 +185,7 @@ module sonata_system
   logic                  gpio_interrupts[TotalGpioNum];
 
   logic ethmac_irq;
+  logic sd_irq;
 
   // Each IP block has a single interrupt line to the PLIC and software shall consult the intr_state
   // register within the block itself to identify the interrupt source(s).
@@ -215,7 +226,8 @@ module sonata_system
   assign intr_vector[15 + I2C_NUM     : 16              ] = i2c_irq;
   assign intr_vector[15               :  8 + UART_NUM   ] = 'b0;
   assign intr_vector[ 7 + UART_NUM    :  8              ] = uart_irq; // Support up to 8 UARTs.
-  assign intr_vector[ 7               :  5              ] = 3'h0;     // Reserved for future use.
+  assign intr_vector[ 7               :  6              ] = 2'h0;     // Reserved for future use.
+  assign intr_vector[ 5                                 ] = sd_irq;   // SD host controller.
   assign intr_vector[ 4                                 ] = gpio_irq;
   assign intr_vector[ 3                                 ] = usbdev_irq;
   assign intr_vector[ 2                                 ] = ethmac_irq;
@@ -334,6 +346,8 @@ module sonata_system
   tlul_pkg::tl_d2h_t tl_hw_rev_d2h;
   tlul_pkg::tl_h2d_t tl_pinmux_h2d;
   tlul_pkg::tl_d2h_t tl_pinmux_d2h;
+  tlul_pkg::tl_h2d_t tl_sd_h2d;
+  tlul_pkg::tl_d2h_t tl_sd_d2h;
   tlul_pkg::tl_h2d_t tl_dbg_dev_ds_h2d;
   tlul_pkg::tl_d2h_t tl_dbg_dev_ds_d2h;
 
@@ -388,7 +402,9 @@ module sonata_system
     .tl_dbg_dev_o     (tl_dbg_dev_us_h2d[1]),
     .tl_dbg_dev_i     (tl_dbg_dev_us_d2h[1]),
     .tl_rv_plic_o     (tl_rv_plic_h2d),
-    .tl_rv_plic_i     (tl_rv_plic_d2h)
+    .tl_rv_plic_i     (tl_rv_plic_d2h),
+    .tl_sd_o          (tl_sd_h2d),
+    .tl_sd_i          (tl_sd_d2h)
   );
 
   xbar_ifetch u_xbar_ifetch (
@@ -1212,6 +1228,25 @@ module sonata_system
 
   // Debug module is not capability-aware.
   assign host_wcap[DbgHost] = 1'b0;
+
+  // SD host controller.
+  sd_tl #(
+    .SysClkFreq(SysClkFreq)
+  ) u_sd (
+    .clk_i      (clk_sys_i),
+    .rst_ni     (rst_sys_ni),
+    .tl_i       (tl_sd_h2d),
+    .tl_o       (tl_sd_d2h),
+    .sd_clk_o   (microsd_clk_o),
+    .sd_cmd_i   (microsd_cmd_i),
+    .sd_cmd_o   (microsd_cmd_o),
+    .sd_cmd_oe_o(microsd_cmd_oe_o),
+    .sd_dat_i   (microsd_dat_i),
+    .sd_dat_o   (microsd_dat_o),
+    .sd_dat_oe_o(microsd_dat_oe_o),
+    .sd_detect_i(microsd_detect_i),
+    .irq_o      (sd_irq)
+  );
 
   system_info #(
     .SysClkFreq (   SysClkFreq ),

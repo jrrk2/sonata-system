@@ -28,6 +28,15 @@ filesets:
       - lowrisc:tlul:adapter_host
       - lowrisc:tlul:adapter_reg
     files:
+      - rtl/ip/sd/sd_defines.h:
+          is_include_file: true
+      - rtl/ip/sd/sd_crc_7.v
+      - rtl/ip/sd/sd_crc_16.v
+      - rtl/ip/sd/sd_cmd_serial_host.v
+      - rtl/ip/sd/sd_data_serial_host.sv
+      - rtl/ip/sd/sd_clock_divider.v
+      - rtl/ip/sd/sd_top.sv
+      - rtl/ip/sd/sd_tl.sv
       - rtl/system/sonata_pkg.sv
       - rtl/bus/sonata_xbar_main.sv
       - rtl/system/jtag_id_pkg.sv

@@ -2258,4 +2258,56 @@ end
   // Certain parameter combinations are not supported
   `ASSERT_INIT(IllegalParamSecure, !(SecureIbex && (RV32M == RV32MNone)))
 
+  // ========================================================================
+  // DEBUG INSTRUMENTATION - Monitor for CPU hang/crash
+  // ========================================================================
+  logic [31:0] last_pc;
+  logic [31:0] hang_counter;
+  logic [31:0] pc_change_counter;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      last_pc <= 32'h0;
+      hang_counter <= 32'h0;
+      pc_change_counter <= 32'h0;
+    end else begin
+      // Track ANY PC that stays the same (looping/stuck)
+      if (pc_id == last_pc) begin
+        hang_counter <= hang_counter + 1;
+
+        // Report every 1024 cycles when PC stuck
+        if (hang_counter[9:0] == 10'h3FF) begin
+          $display("[%t] PC STUCK: 0x%08h for %0d cycles", $time, pc_id, hang_counter);
+          if (data_req_o) $display("  REQ: addr=0x%08h we=%b", data_addr_o, data_we_o);
+          if (data_rvalid_i) $display("  RESP: data=0x%08h", data_rdata_i[31:0]);
+        end
+      end else begin
+        hang_counter <= 32'h0;
+      end
+
+      // Track if PC stops changing entirely
+      if (pc_id != last_pc) begin
+        pc_change_counter <= 32'h0;
+      end else begin
+        pc_change_counter <= pc_change_counter + 1;
+        if (pc_change_counter == 32'd10000) begin
+          $display("[%t] CPU HALTED? PC=0x%08h unchanged for 10000 cycles", $time, pc_id);
+        end
+      end
+
+      // Log PC transitions in/out of critical range
+      if (pc_id >= 32'h111800 && pc_id <= 32'h111900 &&
+          (last_pc < 32'h111800 || last_pc > 32'h111900)) begin
+        $display("[%t] ENTER spi_tx: PC=0x%08h from 0x%08h", $time, pc_id, last_pc);
+      end
+
+      if ((last_pc >= 32'h111800 && last_pc <= 32'h111900) &&
+          (pc_id < 32'h111800 || pc_id > 32'h111900)) begin
+        $display("[%t] EXIT spi_tx: PC=0x%08h to 0x%08h", $time, last_pc, pc_id);
+      end
+
+      last_pc <= pc_id;
+    end
+  end
+
 endmodule

@@ -58,7 +58,9 @@ module sonata_xbar_main
   output tlul_pkg::tl_h2d_t tl_dbg_dev_o,
   input  tlul_pkg::tl_d2h_t tl_dbg_dev_i,
   output tlul_pkg::tl_h2d_t tl_rv_plic_o,
-  input  tlul_pkg::tl_d2h_t tl_rv_plic_i
+  input  tlul_pkg::tl_d2h_t tl_rv_plic_i,
+  output tlul_pkg::tl_h2d_t tl_sd_o,
+  input  tlul_pkg::tl_d2h_t tl_sd_i
 );
 
   xbar_main xbar (
@@ -123,6 +125,8 @@ module sonata_xbar_main
     .tl_dbg_dev_i     (tl_dbg_dev_i),
     .tl_rv_plic_o     (tl_rv_plic_o),
     .tl_rv_plic_i     (tl_rv_plic_i),
+    .tl_sd_o          (tl_sd_o),
+    .tl_sd_i          (tl_sd_i),
 
     .scanmode_i       (prim_mubi_pkg::MuBi4False)
   );

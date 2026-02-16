@@ -59,9 +59,17 @@ filesets:
       - dv/models/fpga/rtl/ISERDESE2.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/OBUF.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/ODDR.v: { file_type: systemVerilogSource }
+      - dv/models/ethernet/ksz8851snl_mac.h: { file_type: systemVerilogSource, is_include_file: true }
+      - dv/models/ethernet/ksz8851snl_mac_model.v: { file_type: systemVerilogSource }
+      - dv/models/ethernet/axis_gmii_rx.v: { file_type: systemVerilogSource }
+      - dv/models/ethernet/axis_gmii_tx.v: { file_type: systemVerilogSource }
+      - dv/models/ethernet/eth_lfsr.v: { file_type: systemVerilogSource }
       - dv/verilator/top_verilator.sv: { file_type: systemVerilogSource }
       - dv/verilator/sonata_system.cc: { file_type: cppSource }
       - dv/verilator/sonata_system.hh:  { file_type: cppSource, is_include_file: true }
+      - dv/verilator/arp_server.h:  { file_type: cppSource, is_include_file: true }
+      - dv/verilator/dhcp_server.h:  { file_type: cppSource, is_include_file: true }
+      - dv/verilator/dhcp_server_extension.h:  { file_type: cppSource, is_include_file: true }
       - dv/verilator/sonata_system_main.cc: { file_type: cppSource }
       - dv/verilator/sonata_verilator_lint.vlt:  { file_type: vlt }
 
@@ -119,6 +127,11 @@ parameters:
     datatype: bool
     paramtype: vlogdefine
     description: Targeting the Sonata XL board rather than the Sonata One board.
+
+  RVFI:
+    datatype: bool
+    paramtype: vlogdefine
+    description: Enable RISC-V Formal Interface for instruction tracing.
 
 targets:
   default: &default_target
@@ -191,6 +204,7 @@ targets:
       # use false for the SRAM model.
       - USE_SEPARATED_CLOCKS=false
       - PRIM_DEFAULT_IMPL=prim_pkg::ImplGeneric
+      - RVFI=true
 
   lint:
     <<: *default_target

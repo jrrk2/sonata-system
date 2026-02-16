@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
       // HyperRAM simulation model external to the Sonata System; driven by HBMC.
       "TOP.top_verilator.u_hyperram_W956.u_ram.gen_generic.u_impl_generic",
 #endif
-      256 * 1024 // 256k words = 1 MiB
+      2 * 1024 * 1024 // 2M words = 8 MiB
   );
 
   return sonata_system.Main(argc, argv);

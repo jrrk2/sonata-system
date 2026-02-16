@@ -126,3 +126,20 @@ tracing_off -file "*uartdpi.sv"
 // bit in the net 'p2d'.
 lint_off -rule UNUSED -file "*usbdpi.sv" -match "*Signal is not used*"
 lint_off -rule UNUSED -file "*usbdpi.sv" -match "*Bits of signal are not used*"
+
+// KSZ8851SNL MAC model has multiple clock domains and some blocking assignments
+lint_off -rule MULTIDRIVEN -file "*ksz8851snl_mac_model.v"
+lint_off -rule BLKSEQ -file "*ksz8851snl_mac_model.v"
+lint_off -rule UNUSED -file "*ksz8851snl_mac_model.v"
+lint_off -rule WIDTHEXPAND -file "*ksz8851snl_mac_model.v"
+lint_off -rule WIDTHTRUNC -file "*ksz8851snl_mac_model.v"
+lint_off -rule UNDRIVEN -file "*ksz8851snl_mac_model.v"
+lint_off -rule UNUSEDSIGNAL -file "*ksz8851snl_mac_model.v"
+lint_off -rule CASEINCOMPLETE -file "*ksz8851snl_mac_model.v"
+
+// Disable warnings in Ethernet support modules
+lint_off -rule WIDTHEXPAND -file "*axis_gmii_tx.v"
+lint_off -rule WIDTHEXPAND -file "*axis_gmii_rx.v"
+lint_off -rule UNUSEDSIGNAL -file "*eth_lfsr.v"
+lint_off -rule WIDTHEXPAND -file "*eth_lfsr.v"
+lint_off -rule WIDTHTRUNC -file "*eth_lfsr.v"

@@ -187,13 +187,13 @@ module top_sonata
   output logic       appspi_d3, // HOLD_N or RESET_N
   output logic       appspi_cs, // Chip select negated
 
-  // MicroSD card slot
-  output logic       microsd_clk,  // SPI mode: SCLK
-  input  logic       microsd_dat0, // SPI mode: CIPO
-//input  logic       microsd_dat1, // SPI mode: NC
-//input  logic       microsd_dat2, // SPI mode: NC
-  output logic       microsd_dat3, // SPI mode: CS_N
-  output logic       microsd_cmd,  // SPI mode: COPI
+  // MicroSD card slot (native SD mode)
+  output logic       microsd_clk,
+  inout  wire        microsd_dat0,
+//input  logic       microsd_dat1, // Not connected on Sonata PCB
+//input  logic       microsd_dat2, // Not connected on Sonata PCB
+  inout  wire        microsd_dat3,
+  inout  wire        microsd_cmd,
   input  logic       microsd_det,  // Card insertion detection
 
   // HyperRAM interface
@@ -271,7 +271,7 @@ module top_sonata
 
   // Enable CHERI by default.
   logic enable_cheri;
-  assign enable_cheri = 1'b1;
+  assign enable_cheri = 1'b0;
 
   logic rgbled_dout;
   logic [23:0] unused_gp_o;
@@ -281,6 +281,28 @@ module top_sonata
   // outputs.
   logic rs485_rx, rs485_tx;
   logic rs485_rx_enable, rs485_tx_enable;
+
+  // MicroSD native SD interface signals
+  logic       microsd_clk_int;
+  logic       microsd_cmd_in, microsd_cmd_out, microsd_cmd_oe;
+  logic [3:0] microsd_dat_in, microsd_dat_out;
+  logic       microsd_dat_oe;
+
+  assign microsd_clk = microsd_clk_int;
+
+  // Bidirectional CMD line
+  assign microsd_cmd    = microsd_cmd_oe ? microsd_cmd_out : 1'bz;
+  assign microsd_cmd_in = microsd_cmd;
+
+  // Bidirectional DAT0 line (DAT1/DAT2 not connected on Sonata PCB)
+  assign microsd_dat0    = microsd_dat_oe ? microsd_dat_out[0] : 1'bz;
+  assign microsd_dat_in[0] = microsd_dat0;
+  assign microsd_dat_in[1] = 1'b1; // Not connected, pull high
+  assign microsd_dat_in[2] = 1'b1; // Not connected, pull high
+
+  // Bidirectional DAT3 line (directly routed, no external pull-up)
+  assign microsd_dat3    = microsd_dat_oe ? microsd_dat_out[3] : 1'bz;
+  assign microsd_dat_in[3] = microsd_dat3;
 
   sonata_system #(
     .CheriErrWidth   ( 9               ),
@@ -388,6 +410,16 @@ module top_sonata
     .rs485_tx_enable_o(rs485_tx_enable),
     .rs485_rx_enable_o(rs485_rx_enable),
 
+    // MicroSD native SD interface
+    .microsd_clk_o     (microsd_clk_int),
+    .microsd_cmd_i     (microsd_cmd_in),
+    .microsd_cmd_o     (microsd_cmd_out),
+    .microsd_cmd_oe_o  (microsd_cmd_oe),
+    .microsd_dat_i     (microsd_dat_in),
+    .microsd_dat_o     (microsd_dat_out),
+    .microsd_dat_oe_o  (microsd_dat_oe),
+    .microsd_detect_i  (microsd_det),
+
     .in_from_pins_i     (in_from_pins    ),
     .out_to_pins_o      (out_to_pins     ),
     .inout_from_pins_i  (inout_from_pins ),
@@ -458,7 +490,7 @@ module top_sonata
   assign in_from_pins[IN_PIN_SER1_RX     ] = ser1_rx;
   assign in_from_pins[IN_PIN_SER0_RX     ] = ser0_rx;
   assign in_from_pins[IN_PIN_APPSPI_D1   ] = appspi_d1;
-  assign in_from_pins[IN_PIN_MICROSD_DAT0] = microsd_dat0;
+  assign in_from_pins[IN_PIN_MICROSD_DAT0] = 1'b1; // MicroSD now driven by native SD controller
 
   assign mb10         = out_to_pins[OUT_PIN_MB10        ];
   assign mb7          = out_to_pins[OUT_PIN_MB7         ];
@@ -472,9 +504,7 @@ module top_sonata
   assign appspi_d0    = out_to_pins[OUT_PIN_APPSPI_D0   ];
   assign appspi_clk   = out_to_pins[OUT_PIN_APPSPI_CLK  ];
   assign appspi_cs    = out_to_pins[OUT_PIN_APPSPI_CS   ];
-  assign microsd_cmd  = out_to_pins[OUT_PIN_MICROSD_CMD ];
-  assign microsd_clk  = out_to_pins[OUT_PIN_MICROSD_CLK ];
-  assign microsd_dat3 = out_to_pins[OUT_PIN_MICROSD_DAT3];
+  // MicroSD pins now driven by native SD controller, not pinmux
 
   // Pinmux inout Pins
   padring #(

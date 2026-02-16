@@ -28,6 +28,8 @@ FetchContent_Populate(REISFMT)
 project(sonata_system_cheriot_sw LANGUAGES C CXX ASM)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} -nostartfiles -nostdlib")
 
 set(CHERIOT_SDK_INCLUDES
   "${CHERIOT_RTOS_SDK}/include/c++-config"

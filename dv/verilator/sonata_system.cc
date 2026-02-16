@@ -16,15 +16,19 @@
 SonataSystem::SonataSystem(const char *ram_hier_path, int ram_size_words,
   const char *hyperram_hier_path, int hyperram_size_words)
     : _ram(ram_hier_path, ram_size_words, 4),
+#ifdef ETH_MAC_MODEL
+      _dhcp_server_ext(&_top),
+#endif
 #ifdef USE_HYPERRAM_SRAM_MODEL
       // The SRAM model within the `hyperram` IP block is 32 bits wide to
       // match the TL-UL bus.
-      _hyperram(hyperram_hier_path, hyperram_size_words, 4) {}
+      _hyperram(hyperram_hier_path, hyperram_size_words, 4)
 #else
       // The simulation model of the W956 HyperRAM chip employs a memory
       // that is 16 bits wide, as per the HyperBus protocol.
-      _hyperram(hyperram_hier_path, hyperram_size_words / 2, 2) {}
+      _hyperram(hyperram_hier_path, hyperram_size_words / 2, 2)
 #endif
+ {}
 
 int SonataSystem::Main(int argc, char **argv) {
   bool exit_app;
@@ -53,6 +57,10 @@ int SonataSystem::Setup(int argc, char **argv, bool &exit_app) {
   _memutil.RegisterMemoryArea("ram", 0x100000, &_ram);
   _memutil.RegisterMemoryArea("hyperram", 0x40000000, &_hyperram);
   simctrl.RegisterExtension(&_memutil);
+
+#ifdef ETH_MAC_MODEL
+  simctrl.RegisterExtension(&_dhcp_server_ext);
+#endif
 
   // Create our clocks with their default properties.
   //
