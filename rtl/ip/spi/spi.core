@@ -12,6 +12,7 @@ filesets:
     files:
       - rtl/spi_reg_pkg.sv
       - rtl/spi_reg_top.sv
+      - rtl/spi_buf_ram.sv
       - rtl/spi_core.sv
       - rtl/spi.sv
     file_type: systemVerilogSource

@@ -101,6 +101,7 @@ parameter FINISH     = 7'b1000000;
 reg [2:0] crc_status;
 reg busy_int;
 reg [`BLKSIZE_W-1:0] blksize_reg;
+reg [`BLKCNT_W-1:0] blkcnt_reg;
 reg [4:0] crc_c;
    reg [3:0]                                         crnt_din;
 reg [4:0] data_index;
@@ -138,7 +139,8 @@ begin: FSM_OUT
         busy_int <= 0;
         data_index <= 0;
         data_cycles <= 0;
-        bus_4bit_reg <= 0;     
+        bus_4bit_reg <= 0;
+        blkcnt_reg <= 0;
         wait_reg_o <= 0;
         finish_o <= 0;
            DAT_dat_reg <= 0;
@@ -168,6 +170,7 @@ begin: FSM_OUT
                 rd <= 0;
                 data_index <= 0;
                 blksize_reg <= blksize;
+                blkcnt_reg <= blkcnt;
                 data_cycles <= (bus_4bit ? {2'b0,blksize,1'b0} + 'd2 : {blksize,3'b0} + 'd8);
                 bus_4bit_reg <= bus_4bit;
 	        wait_reg_o <= 0;
@@ -252,8 +255,20 @@ begin: FSM_OUT
             end
              WRITE_BUSY: begin /* wait for write completion */
                 busy_int <= !DAT_dat_reg[0];
-                if (!busy_int)
-                  state <= FINISH;
+                if (!busy_int) begin
+                  blkcnt_reg <= blkcnt_reg - 1;
+                  if (blkcnt_reg <= 1)
+                    state <= FINISH;
+                  else begin
+                    // More blocks: reset per-block state for next write
+                    transf_cnt_o <= 0;
+                    crc_c <= 16;
+                    crc_rst <= 1;
+                    data_index <= 0;
+                    crc_status <= 0;
+                    state <= WRITE_DAT;
+                  end
+                end
                 end
              READ_WAIT: begin /* wait for a start bit in read mode */
                 DAT_oe_o <= 0;
@@ -308,7 +323,17 @@ begin: FSM_OUT
                   begin
                      for (k = 0; k < 4; k=k+1)
                        crc_lane_ok[k] <= crc_calc[k] == crc_din[k];
-                     state <= FINISH;
+                     blkcnt_reg <= blkcnt_reg - 1;
+                     if (blkcnt_reg <= 1)
+                       state <= FINISH;
+                     else begin
+                       // More blocks: reset per-block state, wait for next start bit
+                       transf_cnt_o <= 0;
+                       crc_c <= 15;
+                       crc_rst <= 1;
+                       data_index <= 0;
+                       state <= READ_WAIT;
+                     end
                 end
             end // case: READ_DAT
 	  FINISH:

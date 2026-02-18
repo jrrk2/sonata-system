@@ -59,6 +59,8 @@ filesets:
       - dv/models/fpga/rtl/ISERDESE2.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/OBUF.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/ODDR.v: { file_type: systemVerilogSource }
+      - dv/models/fpga/rtl/RAMB36E1.v: { file_type: systemVerilogSource }
+      - dv/models/fpga/rtl/BUFG.v: { file_type: systemVerilogSource }
       - dv/models/ethernet/ksz8851snl_mac.h: { file_type: systemVerilogSource, is_include_file: true }
       - dv/models/ethernet/ksz8851snl_mac_model.v: { file_type: systemVerilogSource }
       - dv/models/ethernet/axis_gmii_rx.v: { file_type: systemVerilogSource }
@@ -189,6 +191,7 @@ targets:
           - '--trace-max-array 1024'
           # For a faster simulation using the SRAM model:
           - '-CFLAGS "-Wall -DVM_TRACE_FMT_FST -DTOPLEVEL_NAME=top_verilator -DUSE_HYPERRAM_SRAM_MODEL"'
+          - '-DETH_MAC_MODEL'
           # For a more accurate simulation using the HyperBus controller itself or correct USB frequency:
           # - '-CFLAGS "-Wall -DVM_TRACE_FMT_FST -DTOPLEVEL_NAME=top_verilator -DUSE_SEPARATED_CLOCKS"'
           - '-LDFLAGS "-pthread -lutil -lelf"'

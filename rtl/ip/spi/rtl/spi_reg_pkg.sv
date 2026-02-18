@@ -172,10 +172,10 @@ package spi_reg_pkg;
 
   typedef struct packed {
     struct packed {
-      logic [7:0]  d;
+      logic [11:0] d;
     } tx_fifo_level;
     struct packed {
-      logic [7:0]  d;
+      logic [11:0] d;
     } rx_fifo_level;
     struct packed {
       logic        d;
@@ -194,10 +194,10 @@ package spi_reg_pkg;
 
   typedef struct packed {
     struct packed {
-      logic [7:0]  d;
+      logic [11:0] d;
     } tx_fifo_depth;
     struct packed {
-      logic [7:0]  d;
+      logic [11:0] d;
     } rx_fifo_depth;
   } spi_hw2reg_info_reg_t;
 
@@ -242,9 +242,9 @@ package spi_reg_pkg;
   parameter logic [0:0] SPI_INTR_TEST_TX_EMPTY_RESVAL = 1'h 0;
   parameter logic [0:0] SPI_INTR_TEST_TX_WATERMARK_RESVAL = 1'h 0;
   parameter logic [0:0] SPI_INTR_TEST_COMPLETE_RESVAL = 1'h 0;
-  parameter logic [18:0] SPI_STATUS_RESVAL = 19'h 0;
+  parameter logic [26:0] SPI_STATUS_RESVAL = 27'h 0;
   parameter logic [7:0] SPI_RX_FIFO_RESVAL = 8'h 0;
-  parameter logic [15:0] SPI_INFO_RESVAL = 16'h 0;
+  parameter logic [23:0] SPI_INFO_RESVAL = 24'h 0;
 
   // Register index
   typedef enum int {
@@ -268,11 +268,11 @@ package spi_reg_pkg;
     4'b 0001, // index[ 2] SPI_INTR_TEST
     4'b 1111, // index[ 3] SPI_CFG
     4'b 1111, // index[ 4] SPI_CONTROL
-    4'b 0111, // index[ 5] SPI_STATUS
+    4'b 1111, // index[ 5] SPI_STATUS
     4'b 0011, // index[ 6] SPI_START
     4'b 0001, // index[ 7] SPI_RX_FIFO
     4'b 0001, // index[ 8] SPI_TX_FIFO
-    4'b 0011, // index[ 9] SPI_INFO
+    4'b 0111, // index[ 9] SPI_INFO
     4'b 0001  // index[10] SPI_CS
   };
 

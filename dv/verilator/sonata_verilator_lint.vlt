@@ -116,6 +116,23 @@ lint_off -rule UNUSED -file "*IOBUF.v"
 lint_off -rule UNUSED -file "*ISERDESE2.v"
 lint_off -rule UNUSED -file "*OBUF.v"
 lint_off -rule UNUSED -file "*ODDR.v"
+lint_off -rule UNUSED -file "*RAMB36E1.v"
+lint_off -rule MULTIDRIVEN -file "*RAMB36E1.v"
+lint_off -rule UNUSED -file "*BUFG.v"
+
+// Disable warnings in SD controller (third-party Verilog)
+lint_off -rule BLKSEQ -file "*sd_cmd_serial_host.v"
+lint_off -rule BLKSEQ -file "*sd_data_serial_host.sv"
+lint_off -rule SYNCASYNCNET -file "*sd_top.sv"
+lint_off -rule WIDTHEXPAND -file "*sd_tl.sv"
+lint_off -rule UNUSEDPARAM -file "*sd_tl.sv"
+lint_off -rule UNUSEDSIGNAL -file "*sd_tl.sv"
+lint_off -rule UNUSEDSIGNAL -file "*sd_data_serial_host.sv"
+lint_off -rule PINMISSING -file "*top_verilator.sv"
+
+// SPI buffer-mode: wmask bits used only for byte-enable extraction; FIFO depth params vestigial
+lint_off -rule UNUSEDSIGNAL -file "*spi.sv" -match "*wmask*"
+lint_off -rule UNUSEDPARAM -file "*spi.sv" -match "*FifoDepth*"
 
 // Bug seem in Verilator v5.020 where trace chandles produces a C++ compilation
 // error (generated C++ doesn't currently specify a type an internal verilator

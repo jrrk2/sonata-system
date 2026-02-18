@@ -136,8 +136,8 @@ module spi_reg_top (
   logic control_int_loopback_wd;
   logic control_sw_reset_wd;
   logic status_re;
-  logic [7:0] status_tx_fifo_level_qs;
-  logic [7:0] status_rx_fifo_level_qs;
+  logic [11:0] status_tx_fifo_level_qs;
+  logic [11:0] status_rx_fifo_level_qs;
   logic status_tx_fifo_full_qs;
   logic status_rx_fifo_empty_qs;
   logic status_idle_qs;
@@ -148,8 +148,8 @@ module spi_reg_top (
   logic tx_fifo_we;
   logic [7:0] tx_fifo_wd;
   logic info_re;
-  logic [7:0] info_tx_fifo_depth_qs;
-  logic [7:0] info_rx_fifo_depth_qs;
+  logic [11:0] info_tx_fifo_depth_qs;
+  logic [11:0] info_rx_fifo_depth_qs;
   logic cs_we;
   logic cs_cs_0_qs;
   logic cs_cs_0_wd;
@@ -895,9 +895,9 @@ module spi_reg_top (
 
 
   // R[status]: V(True)
-  //   F[tx_fifo_level]: 7:0
+  //   F[tx_fifo_level]: 11:0
   prim_subreg_ext #(
-    .DW    (8)
+    .DW    (12)
   ) u_status_tx_fifo_level (
     .re     (status_re),
     .we     (1'b0),
@@ -910,9 +910,9 @@ module spi_reg_top (
     .qs     (status_tx_fifo_level_qs)
   );
 
-  //   F[rx_fifo_level]: 15:8
+  //   F[rx_fifo_level]: 23:12
   prim_subreg_ext #(
-    .DW    (8)
+    .DW    (12)
   ) u_status_rx_fifo_level (
     .re     (status_re),
     .we     (1'b0),
@@ -925,7 +925,7 @@ module spi_reg_top (
     .qs     (status_rx_fifo_level_qs)
   );
 
-  //   F[tx_fifo_full]: 16:16
+  //   F[tx_fifo_full]: 24:24
   prim_subreg_ext #(
     .DW    (1)
   ) u_status_tx_fifo_full (
@@ -940,7 +940,7 @@ module spi_reg_top (
     .qs     (status_tx_fifo_full_qs)
   );
 
-  //   F[rx_fifo_empty]: 17:17
+  //   F[rx_fifo_empty]: 25:25
   prim_subreg_ext #(
     .DW    (1)
   ) u_status_rx_fifo_empty (
@@ -955,7 +955,7 @@ module spi_reg_top (
     .qs     (status_rx_fifo_empty_qs)
   );
 
-  //   F[idle]: 18:18
+  //   F[idle]: 26:26
   prim_subreg_ext #(
     .DW    (1)
   ) u_status_idle (
@@ -1068,9 +1068,9 @@ module spi_reg_top (
 
 
   // R[info]: V(True)
-  //   F[tx_fifo_depth]: 7:0
+  //   F[tx_fifo_depth]: 11:0
   prim_subreg_ext #(
-    .DW    (8)
+    .DW    (12)
   ) u_info_tx_fifo_depth (
     .re     (info_re),
     .we     (1'b0),
@@ -1083,9 +1083,9 @@ module spi_reg_top (
     .qs     (info_tx_fifo_depth_qs)
   );
 
-  //   F[rx_fifo_depth]: 15:8
+  //   F[rx_fifo_depth]: 23:12
   prim_subreg_ext #(
-    .DW    (8)
+    .DW    (12)
   ) u_info_rx_fifo_depth (
     .re     (info_re),
     .we     (1'b0),
@@ -1366,11 +1366,11 @@ module spi_reg_top (
       end
 
       addr_hit[5]: begin
-        reg_rdata_next[7:0] = status_tx_fifo_level_qs;
-        reg_rdata_next[15:8] = status_rx_fifo_level_qs;
-        reg_rdata_next[16] = status_tx_fifo_full_qs;
-        reg_rdata_next[17] = status_rx_fifo_empty_qs;
-        reg_rdata_next[18] = status_idle_qs;
+        reg_rdata_next[11:0] = status_tx_fifo_level_qs;
+        reg_rdata_next[23:12] = status_rx_fifo_level_qs;
+        reg_rdata_next[24] = status_tx_fifo_full_qs;
+        reg_rdata_next[25] = status_rx_fifo_empty_qs;
+        reg_rdata_next[26] = status_idle_qs;
       end
 
       addr_hit[6]: begin
@@ -1386,8 +1386,8 @@ module spi_reg_top (
       end
 
       addr_hit[9]: begin
-        reg_rdata_next[7:0] = info_tx_fifo_depth_qs;
-        reg_rdata_next[15:8] = info_rx_fifo_depth_qs;
+        reg_rdata_next[11:0] = info_tx_fifo_depth_qs;
+        reg_rdata_next[23:12] = info_rx_fifo_depth_qs;
       end
 
       addr_hit[10]: begin

@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // TL-UL wrapper for the lowRISC SD host controller.
-// Provides a register interface matching lowrisc_sd.h plus a 512-byte
-// data buffer for single-block transfers.
+// Provides a register interface matching lowrisc_sd.h plus a 4KB
+// data buffer for multi-block transfers (up to 8 x 512B blocks).
 
 `default_nettype none
 
@@ -37,7 +37,7 @@ module sd_tl
   // ----------------------------------------------------------------
   // TL-UL adapter: converts TL-UL to simple register interface
   // ----------------------------------------------------------------
-  localparam int unsigned RegAw = 12; // 4KB address space
+  localparam int unsigned RegAw = 13; // 8KB address space (regs + 4KB data buffer)
 
   logic             reg_re, reg_we;
   logic [RegAw-1:0] reg_addr;
@@ -71,12 +71,12 @@ module sd_tl
   // ----------------------------------------------------------------
   // Address decode: registers at 0x000-0x0FF, data buffer at 0x200-0x3FF
   // ----------------------------------------------------------------
-  wire reg_sel  = ~reg_addr[9];          // 0x000-0x1FF → registers
-  wire buf_sel  =  reg_addr[9];          // 0x200-0x3FF → data buffer
+  wire reg_sel  = ~reg_addr[12];         // 0x0000-0x0FFF → registers
+  wire buf_sel  =  reg_addr[12];         // 0x1000-0x1FFF → data buffer (4KB)
 
   wire [4:0] wr_idx = reg_addr[6:2];    // Write register index (0-31)
   wire [4:0] rd_idx = reg_addr[6:2];    // Read register index (0-31)
-  wire [6:0] buf_word_addr = reg_addr[8:2]; // Data buffer word address (0-127)
+  wire [9:0] buf_word_addr = reg_addr[11:2]; // Data buffer word address (0-1023)
 
   // ----------------------------------------------------------------
   // SD clock generation
@@ -241,13 +241,13 @@ module sd_tl
   );
 
   // ----------------------------------------------------------------
-  // Data buffer: 128-word (512-byte) true dual-port block RAM
+  // Data buffer: 1024-word (4KB) true dual-port block RAM
   //   Port A: CPU side (clk_i), addressed by reg_addr
   //   Port B: SD controller side (negedge sd_clk), addressed by sd_xfr_addr
   //
   // Direct RAMB36E1 instantiation (Artix-7 primitive) to guarantee
-  // correct cross-clock-domain dual-port operation. Previous inferred
-  // RAM failed: only first word visible on CPU reads.
+  // correct cross-clock-domain dual-port operation. Supports up to 8
+  // blocks (4KB) for multi-block SD transfers.
   // ----------------------------------------------------------------
 
   // RX: byte-swap data coming from SD card before storing
@@ -286,7 +286,7 @@ module sd_tl
   end
 
   // RAMB36E1: 36Kb true dual-port block RAM (Artix-7)
-  // Configured as 1K x 36 (width-36 TDP), using 128 of 1024 locations.
+  // Configured as 1K x 36 (width-36 TDP), using all 1024 locations (4KB).
   // Address mapping for width 36: ADDR[15:5] = {1'b1, addr[9:0]}, ADDR[4:0] = 0
   RAMB36E1 #(
     .DOA_REG            (0),
@@ -313,7 +313,7 @@ module sd_tl
     .CLKARDCLK          (clk_i),
     .ENARDEN             (port_a_en),
     .WEA                 ({4{port_a_we}}),
-    .ADDRARDADDR         ({1'b1, 3'b000, buf_word_addr, 5'b00000}),
+    .ADDRARDADDR         ({1'b1, buf_word_addr, 5'b00000}),
     .DIADI               (reg_wdata),
     .DIPADIP             (4'b0000),
     .DOADO               (buf_rdata_bram),
@@ -326,7 +326,7 @@ module sd_tl
     .CLKBWRCLK           (sd_clk_b),
     .ENBWREN             (port_b_en),
     .WEBWE               ({4'b0000, {4{port_b_we}}}),
-    .ADDRBWRADDR         ({1'b1, 3'b000, sd_xfr_addr[6:0], 5'b00000}),
+    .ADDRBWRADDR         ({1'b1, sd_xfr_addr[9:0], 5'b00000}),
     .DIBDI               (rx_data_swapped),
     .DIPBDIP             (4'b0000),
     .DOBDO               (tx_data_raw_bram),
@@ -478,7 +478,7 @@ module sd_tl
         5'd12: reg_rdata = {31'b0, detect_reg};
         5'd13: reg_rdata = {22'b0, xfr_addr_reg};
         5'd14: reg_rdata = {28'b0, irq_status};
-        5'd15: reg_rdata = 32'h5D_02_15_04; // Version: "SD" + date 2026-02-15 + rev 4 (AccessLatency fix)
+        5'd15: reg_rdata = 32'h5D_02_16_05; // Version: "SD" + date 2026-02-16 + rev 5 (4KB multi-block buffer)
         // Register readbacks (16-27)
         5'd16: reg_rdata = {30'b0, sd_align_reg};
         5'd17: reg_rdata = {24'b0, clock_divider_reg};

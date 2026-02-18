@@ -706,35 +706,43 @@ module top_verilator #(
   );
 `endif
 
-`ifdef ETH_MAC_MODEL   
+`ifdef ETH_MAC_MODEL
   // KSZ8851SNL Ethernet MAC Model
-  // RMII RX signals for packet injection
-  reg [1:0] rmii_rxd /* verilator public */;
-  reg       rmii_rx_dv /* verilator public */;
-  reg       rmii_rx_er /* verilator public */;
-  wire [1:0] rmii_txd /* verilator public */;
-  wire       rmii_tx_en /* verilator public */;
+  // AXI-Stream RX interface for packet injection
+  reg  [7:0] eth_rx_data  /* verilator public */;
+  reg        eth_rx_valid /* verilator public */;
+  reg        eth_rx_last  /* verilator public */;
+  wire [7:0] eth_tx_data  /* verilator public */;
+  wire       eth_tx_valid /* verilator public */;
+  wire       eth_tx_last  /* verilator public */;
   wire [7:0] gmii_txd_mon /* verilator public */;
   wire       gmii_tx_en_mon /* verilator public */;
   wire       gmii_tx_er_mon /* verilator public */;
 
+  initial begin
+    eth_rx_data  = 8'h0;
+    eth_rx_valid = 1'b0;
+    eth_rx_last  = 1'b0;
+  end
+
   // Note: The MAC model needs a 25MHz clock; for now using clk_i (40MHz)
-  // TODO: Generate proper 25MHz clock or adjust model
   ksz8851snl_mac_model u_eth_mac (
-    .csn        (ethmac_cs),       // Active low - direct connection
+    .csn        (ethmac_cs),
     .sclk       (ethmac_sclk),
     .si         (ethmac_copi),
     .so         (ethmac_cipo),
     .rstn       (ethmac_rst),
-    .clk_25mhz  (clk_i),           // Using system clock for now
-    .intrn      (ethmac_irq),      // Active low interrupt
-    // RMII interface for packet injection
-    .rxd        (rmii_rxd),
-    .rx_dv      (rmii_rx_dv),
-    .rx_er      (rmii_rx_er),
-    .txd        (rmii_txd),
-    .tx_en      (rmii_tx_en),
-    // Debug outputs (unused in integration)
+    .clk_25mhz  (clk_i),
+    .intrn      (ethmac_irq),
+    // AXI-Stream RX interface (for packet injection)
+    .rx_data    (eth_rx_data),
+    .rx_valid   (eth_rx_valid),
+    .rx_last    (eth_rx_last),
+    // AXI-Stream TX interface (packets sent by firmware)
+    .tx_data    (eth_tx_data),
+    .tx_valid   (eth_tx_valid),
+    .tx_last    (eth_tx_last),
+    // Debug outputs
     .chip_state (),
     .rx_state_mon (),
     .tx_state_mon (),
@@ -746,7 +754,7 @@ module top_verilator #(
     .cmd_byte1 (),
     .read_pulse (),
     .write_pulse (),
-    // GMII monitor outputs for DHCP server
+    // GMII monitor outputs
     .gmii_txd_mon (gmii_txd_mon),
     .gmii_tx_en_mon (gmii_tx_en_mon),
     .gmii_tx_er_mon (gmii_tx_er_mon)

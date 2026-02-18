@@ -190,8 +190,8 @@ module top_sonata
   // MicroSD card slot (native SD mode)
   output logic       microsd_clk,
   inout  wire        microsd_dat0,
-//input  logic       microsd_dat1, // Not connected on Sonata PCB
-//input  logic       microsd_dat2, // Not connected on Sonata PCB
+  inout  wire        microsd_dat1,
+  inout  wire        microsd_dat2,
   inout  wire        microsd_dat3,
   inout  wire        microsd_cmd,
   input  logic       microsd_det,  // Card insertion detection
@@ -294,11 +294,13 @@ module top_sonata
   assign microsd_cmd    = microsd_cmd_oe ? microsd_cmd_out : 1'bz;
   assign microsd_cmd_in = microsd_cmd;
 
-  // Bidirectional DAT0 line (DAT1/DAT2 not connected on Sonata PCB)
+  // Bidirectional DAT lines
   assign microsd_dat0    = microsd_dat_oe ? microsd_dat_out[0] : 1'bz;
   assign microsd_dat_in[0] = microsd_dat0;
-  assign microsd_dat_in[1] = 1'b1; // Not connected, pull high
-  assign microsd_dat_in[2] = 1'b1; // Not connected, pull high
+  assign microsd_dat1    = microsd_dat_oe ? microsd_dat_out[1] : 1'bz;
+  assign microsd_dat_in[1] = microsd_dat1;
+  assign microsd_dat2    = microsd_dat_oe ? microsd_dat_out[2] : 1'bz;
+  assign microsd_dat_in[2] = microsd_dat2;
 
   // Bidirectional DAT3 line (directly routed, no external pull-up)
   assign microsd_dat3    = microsd_dat_oe ? microsd_dat_out[3] : 1'bz;

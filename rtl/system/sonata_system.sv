@@ -1069,7 +1069,8 @@ module sonata_system
   );
 
   spi #(
-    .CSWidth(2)
+    .CSWidth(2),
+    .BufDepth(2048)
   ) u_spi_ethmac (
     .clk_i               (clk_sys_i),
     .rst_ni              (rst_sys_ni),
