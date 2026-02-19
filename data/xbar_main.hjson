@@ -182,6 +182,16 @@
     % endfor
     % endif
     % endfor
+    { name:  "flash_xip_reg", // XIP flash controller registers
+      type:  "device",
+      clock: "clk_sys_i",
+      reset: "rst_sys_ni",
+      xbar:  false,
+      addr_range: [{
+        base_addr: "0x80130000",
+        size_byte: "0x00000100",
+      }],
+    },
     { name:  "usbdev", // USB device
       type:  "device",
       clock: "clk_usb_i",
@@ -240,6 +250,7 @@
       % endfor
       % endif
       % endfor
+      "flash_xip_reg",
       "usbdev",
       "rv_plic",
     ],

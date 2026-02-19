@@ -105,6 +105,13 @@ module sonata_system
   output wire                      rs485_rx_enable_o,
   output wire                      rs485_tx_enable_o,
 
+  // QSPI flash XIP interface
+  output logic                     spi_flash_clk_o,
+  output logic                     spi_flash_cs_n_o,
+  output logic [3:0]               spi_flash_d_o,
+  input  logic [3:0]               spi_flash_d_i,
+  output logic [3:0]               spi_flash_d_oe_o,
+
   // MicroSD native SD interface
   output logic                     microsd_clk_o,
   input  logic                     microsd_cmd_i,
@@ -348,6 +355,16 @@ module sonata_system
   tlul_pkg::tl_d2h_t tl_pinmux_d2h;
   tlul_pkg::tl_h2d_t tl_sd_h2d;
   tlul_pkg::tl_d2h_t tl_sd_d2h;
+  tlul_pkg::tl_h2d_t tl_flash_xip_main_h2d;
+  tlul_pkg::tl_d2h_t tl_flash_xip_main_d2h;
+  tlul_pkg::tl_h2d_t tl_flash_xip_reg_h2d;
+  tlul_pkg::tl_d2h_t tl_flash_xip_reg_d2h;
+  tlul_pkg::tl_h2d_t tl_flash_xip_ifetch_h2d;
+  tlul_pkg::tl_d2h_t tl_flash_xip_ifetch_d2h;
+  tlul_pkg::tl_h2d_t tl_flash_xip_us_h2d [2];
+  tlul_pkg::tl_d2h_t tl_flash_xip_us_d2h [2];
+  tlul_pkg::tl_h2d_t tl_flash_xip_ds_h2d;
+  tlul_pkg::tl_d2h_t tl_flash_xip_ds_d2h;
   tlul_pkg::tl_h2d_t tl_dbg_dev_ds_h2d;
   tlul_pkg::tl_d2h_t tl_dbg_dev_ds_d2h;
 
@@ -404,7 +421,11 @@ module sonata_system
     .tl_rv_plic_o     (tl_rv_plic_h2d),
     .tl_rv_plic_i     (tl_rv_plic_d2h),
     .tl_sd_o          (tl_sd_h2d),
-    .tl_sd_i          (tl_sd_d2h)
+    .tl_sd_i          (tl_sd_d2h),
+    .tl_flash_xip_o   (tl_flash_xip_main_h2d),
+    .tl_flash_xip_i   (tl_flash_xip_main_d2h),
+    .tl_flash_xip_reg_o (tl_flash_xip_reg_h2d),
+    .tl_flash_xip_reg_i (tl_flash_xip_reg_d2h)
   );
 
   xbar_ifetch u_xbar_ifetch (
@@ -421,8 +442,10 @@ module sonata_system
     .tl_sram_i     (tl_sram_b_d2h),
     .tl_hyperram_o (tl_hyperram_h2d[1]),
     .tl_hyperram_i (tl_hyperram_d2h[1]),
-    .tl_dbg_dev_o  (tl_dbg_dev_us_h2d[0]),
-    .tl_dbg_dev_i  (tl_dbg_dev_us_d2h[0]),
+    .tl_dbg_dev_o     (tl_dbg_dev_us_h2d[0]),
+    .tl_dbg_dev_i     (tl_dbg_dev_us_d2h[0]),
+    .tl_flash_xip_o   (tl_flash_xip_ifetch_h2d),
+    .tl_flash_xip_i   (tl_flash_xip_ifetch_d2h),
 
     .scanmode_i (prim_mubi_pkg::MuBi4False)
   );
@@ -1247,6 +1270,47 @@ module sonata_system
     .sd_dat_oe_o(microsd_dat_oe_o),
     .sd_detect_i(microsd_detect_i),
     .irq_o      (sd_irq)
+  );
+
+  // QSPI flash XIP controller.
+  // Merge the two TileLink paths (from xbar_main and xbar_ifetch) into one.
+  assign tl_flash_xip_us_h2d[0] = tl_flash_xip_main_h2d;
+  assign tl_flash_xip_main_d2h  = tl_flash_xip_us_d2h[0];
+  assign tl_flash_xip_us_h2d[1] = tl_flash_xip_ifetch_h2d;
+  assign tl_flash_xip_ifetch_d2h = tl_flash_xip_us_d2h[1];
+
+  tlul_socket_m1 #(
+    .HReqDepth (8'h0),
+    .HRspDepth (8'h0),
+    .DReqDepth (4'h0),
+    .DRspDepth (4'h0),
+    .M         (2)
+  ) u_flash_xip_tl_socket (
+    .clk_i  (clk_sys_i),
+    .rst_ni (rst_sys_ni),
+    .tl_h_i (tl_flash_xip_us_h2d),
+    .tl_h_o (tl_flash_xip_us_d2h),
+    .tl_d_o (tl_flash_xip_ds_h2d),
+    .tl_d_i (tl_flash_xip_ds_d2h)
+  );
+
+  spi_flash_xip #(
+    .AddrWidth     ( 25 ), // 32 MB
+    .DataWidth     ( 32 ),
+    .SpiClkDiv     ( 3  ), // sys_clk/8 = 5 MHz SPI (with 40 MHz sys)
+    .LineSizeBytes ( 32 )  // 32-byte prefetch line
+  ) u_spi_flash_xip (
+    .clk_i      (clk_sys_i),
+    .rst_ni     (rst_sys_ni),
+    .tl_i       (tl_flash_xip_ds_h2d),
+    .tl_o       (tl_flash_xip_ds_d2h),
+    .tl_reg_i   (tl_flash_xip_reg_h2d),
+    .tl_reg_o   (tl_flash_xip_reg_d2h),
+    .spi_clk_o  (spi_flash_clk_o),
+    .spi_cs_n_o (spi_flash_cs_n_o),
+    .spi_d_o    (spi_flash_d_o),
+    .spi_d_i    (spi_flash_d_i),
+    .spi_d_oe_o (spi_flash_d_oe_o)
   );
 
   system_info #(

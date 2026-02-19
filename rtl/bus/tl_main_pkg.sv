@@ -30,7 +30,9 @@ package tl_main_pkg;
   localparam logic [31:0] ADDR_SPACE_USBDEV      = 32'h 80400000;
   localparam logic [31:0] ADDR_SPACE_DBG_DEV     = 32'h b0000000;
   localparam logic [31:0] ADDR_SPACE_SD          = 32'h 80500000;
+  localparam logic [31:0] ADDR_SPACE_FLASH_XIP   = 32'h 20000000;
   localparam logic [31:0] ADDR_SPACE_RV_PLIC     = 32'h 88000000;
+  localparam logic [31:0] ADDR_SPACE_FLASH_XIP_REG = 32'h 80130000;
 
   localparam logic [31:0] ADDR_MASK_SRAM        = 32'h 0001ffff;
   localparam logic [31:0] ADDR_MASK_HYPERRAM    = 32'h 007fffff;
@@ -56,10 +58,12 @@ package tl_main_pkg;
   localparam logic [31:0] ADDR_MASK_USBDEV      = 32'h 00000fff;
   localparam logic [31:0] ADDR_MASK_DBG_DEV     = 32'h 00000fff;
   localparam logic [31:0] ADDR_MASK_SD          = 32'h 00001fff;
+  localparam logic [31:0] ADDR_MASK_FLASH_XIP   = 32'h 01ffffff;
   localparam logic [31:0] ADDR_MASK_RV_PLIC     = 32'h 03ffffff;
+  localparam logic [31:0] ADDR_MASK_FLASH_XIP_REG = 32'h 000000ff;
 
   localparam int N_HOST   = 2;
-  localparam int N_DEVICE = 25;
+  localparam int N_DEVICE = 27;
 
   typedef enum int {
     TlSram = 0,
@@ -86,7 +90,9 @@ package tl_main_pkg;
     TlUsbdev = 21,
     TlDbgDev = 22,
     TlRvPlic = 23,
-    TlSd = 24
+    TlSd = 24,
+    TlFlashXip = 25,
+    TlFlashXipReg = 26
   } tl_device_e;
 
   typedef enum int {

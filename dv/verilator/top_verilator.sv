@@ -130,19 +130,19 @@ module top_verilator #(
   wire usb_dp_pullup; // D+ pullup enable.
   wire usb_dn_pullup; // D- pullup enable.
 
-  // SPI flash interface.
-  wire appspi_clk = out_to_pins[OUT_PIN_APPSPI_CLK];
-  // COPI (controller output peripheral input)
-  wire appspi_d0 = out_to_pins[OUT_PIN_APPSPI_D0];
-  // CIPO (controller input peripheral output)
-  wire appspi_d1;
-  assign in_from_pins[IN_PIN_APPSPI_D1] = appspi_d1;
-  // WP_N (write protect negated)
-  wire appspi_d2 = 1'b1;
-  // HOLD_N or RESET_N
-  wire appspi_d3 = 1'b1;
-  // Chip select negated
-  wire appspi_cs = out_to_pins[OUT_PIN_APPSPI_CS];
+  // QSPI flash XIP interface (directly from spi_flash_xip controller).
+  wire        spi_flash_clk;
+  wire        spi_flash_cs_n;
+  wire  [3:0] spi_flash_d_o;
+  wire  [3:0] spi_flash_d_i;
+  wire  [3:0] spi_flash_d_oe;
+
+  // Legacy SPI flash pinmux signals (no longer drive flash; just consume outputs)
+  assign in_from_pins[IN_PIN_APPSPI_D1] = 1'b1;
+  logic _unused_appspi_pinmux;
+  assign _unused_appspi_pinmux = ^{out_to_pins[OUT_PIN_APPSPI_D0],
+                                   out_to_pins[OUT_PIN_APPSPI_CLK],
+                                   out_to_pins[OUT_PIN_APPSPI_CS]};
 
   // microSD card interface.
   wire microsd_clk;  // SPI mode: SCLK
@@ -462,6 +462,23 @@ module top_verilator #(
     .rs485_tx_enable_o(rs485_tx_enable),
     .rs485_rx_enable_o(rs485_rx_enable),
 
+    // QSPI flash XIP
+    .spi_flash_clk_o   (spi_flash_clk),
+    .spi_flash_cs_n_o  (spi_flash_cs_n),
+    .spi_flash_d_o     (spi_flash_d_o),
+    .spi_flash_d_i     (spi_flash_d_i),
+    .spi_flash_d_oe_o  (spi_flash_d_oe),
+
+    // MicroSD native SD interface
+    .microsd_clk_o     (),
+    .microsd_cmd_i     (1'b1),
+    .microsd_cmd_o     (),
+    .microsd_cmd_oe_o  (),
+    .microsd_dat_i     (4'hF),
+    .microsd_dat_o     (),
+    .microsd_dat_oe_o  (),
+    .microsd_detect_i  (microsd_det),
+
     .in_from_pins_i     (in_from_pins    ),
     .out_to_pins_o      (out_to_pins     ),
     .inout_from_pins_i  (inout_from_pins ),
@@ -574,23 +591,16 @@ module top_verilator #(
     .pullupdn_d2p    (usb_dn_pullup)
   );
 
-  // SPI connection to flash.
-  spidpi #(
-    .ID       ("flash"),
-    .NDevices (1),
-    .DataW    (1),
-    .OOB_InW  (2),
-    .OOB_OutW (1)
-  ) u_spidpi_flash (
-    .rst_ni   (rst_ni),
-
-    .sck      (appspi_clk),
-    .cs       (appspi_cs),
-    .copi     (appspi_d0),
-    .cipo     (appspi_d1),
-
-    .oob_in   ({appspi_d3, appspi_d2}),
-    .oob_out  ( )
+  // W25Q256 QSPI flash model (connected to XIP controller).
+  w25q256_model #(
+    .FlashSizeBytes ( 32 * 1024 * 1024 ),
+    .FlashInitFile  ( ""               )  // Default: incrementing pattern
+  ) u_w25q256 (
+    .sck_i   (spi_flash_clk),
+    .cs_ni   (spi_flash_cs_n),
+    .d_i     (spi_flash_d_o),
+    .d_o     (spi_flash_d_i),
+    .d_oe_i  (spi_flash_d_oe)
   );
 
   // SPI connection to LCD.

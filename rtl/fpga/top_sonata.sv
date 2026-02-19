@@ -179,12 +179,12 @@ module top_sonata
   input  logic       td_i,
   output logic       td_o,
 
-  // SPI flash interface
+  // QSPI flash interface
   output logic       appspi_clk,
-  output logic       appspi_d0, // COPI (controller output peripheral input)
-  input  logic       appspi_d1, // CIPO (controller input peripheral output)
-  output logic       appspi_d2, // WP_N (write protect negated)
-  output logic       appspi_d3, // HOLD_N or RESET_N
+  inout  wire        appspi_d0, // COPI / IO0
+  inout  wire        appspi_d1, // CIPO / IO1
+  inout  wire        appspi_d2, // WP_N / IO2
+  inout  wire        appspi_d3, // HOLD_N / IO3
   output logic       appspi_cs, // Chip select negated
 
   // MicroSD card slot (native SD mode)
@@ -306,6 +306,21 @@ module top_sonata
   assign microsd_dat3    = microsd_dat_oe ? microsd_dat_out[3] : 1'bz;
   assign microsd_dat_in[3] = microsd_dat3;
 
+  // QSPI flash XIP interface signals
+  logic       spi_flash_clk;
+  logic       spi_flash_cs_n;
+  logic [3:0] spi_flash_d_o;
+  logic [3:0] spi_flash_d_i;
+  logic [3:0] spi_flash_d_oe;
+
+  assign appspi_clk = spi_flash_clk;
+  assign appspi_cs  = spi_flash_cs_n;
+  assign appspi_d0  = spi_flash_d_oe[0] ? spi_flash_d_o[0] : 1'bz;
+  assign appspi_d1  = spi_flash_d_oe[1] ? spi_flash_d_o[1] : 1'bz;
+  assign appspi_d2  = spi_flash_d_oe[2] ? spi_flash_d_o[2] : 1'bz;
+  assign appspi_d3  = spi_flash_d_oe[3] ? spi_flash_d_o[3] : 1'bz;
+  assign spi_flash_d_i = {appspi_d3, appspi_d2, appspi_d1, appspi_d0};
+
   sonata_system #(
     .CheriErrWidth   ( 9               ),
     .SRAMInitFile    ( SRAMInitFile    ),
@@ -422,6 +437,13 @@ module top_sonata
     .microsd_dat_oe_o  (microsd_dat_oe),
     .microsd_detect_i  (microsd_det),
 
+    // QSPI flash XIP
+    .spi_flash_clk_o   (spi_flash_clk),
+    .spi_flash_cs_n_o  (spi_flash_cs_n),
+    .spi_flash_d_o     (spi_flash_d_o),
+    .spi_flash_d_i     (spi_flash_d_i),
+    .spi_flash_d_oe_o  (spi_flash_d_oe),
+
     .in_from_pins_i     (in_from_pins    ),
     .out_to_pins_o      (out_to_pins     ),
     .inout_from_pins_i  (inout_from_pins ),
@@ -435,9 +457,7 @@ module top_sonata
   assign rgbled_en = 1'b1;
 `endif
 
-  // Tie flash wp_n and hold_n to 1 as they're active low and we don't need either signal
-  assign appspi_d2 = 1'b1;
-  assign appspi_d3 = 1'b1;
+  // appspi_d0-d3 now driven by XIP controller (bidirectional with tristate)
 
   assign led_cheri = cheri_en;
   assign led_legacy = ~cheri_en;
@@ -491,7 +511,7 @@ module top_sonata
   assign in_from_pins[IN_PIN_RS485_RX    ] = rs485_rx;
   assign in_from_pins[IN_PIN_SER1_RX     ] = ser1_rx;
   assign in_from_pins[IN_PIN_SER0_RX     ] = ser0_rx;
-  assign in_from_pins[IN_PIN_APPSPI_D1   ] = appspi_d1;
+  assign in_from_pins[IN_PIN_APPSPI_D1   ] = appspi_d1; // Still connected for pinmux visibility
   assign in_from_pins[IN_PIN_MICROSD_DAT0] = 1'b1; // MicroSD now driven by native SD controller
 
   assign mb10         = out_to_pins[OUT_PIN_MB10        ];
@@ -503,9 +523,11 @@ module top_sonata
   assign rs485_tx     = out_to_pins[OUT_PIN_RS485_TX    ];
   assign ser1_tx      = out_to_pins[OUT_PIN_SER1_TX     ];
   assign ser0_tx      = out_to_pins[OUT_PIN_SER0_TX     ];
-  assign appspi_d0    = out_to_pins[OUT_PIN_APPSPI_D0   ];
-  assign appspi_clk   = out_to_pins[OUT_PIN_APPSPI_CLK  ];
-  assign appspi_cs    = out_to_pins[OUT_PIN_APPSPI_CS   ];
+  // appspi pins now driven by XIP controller, not pinmux
+  logic _unused_appspi_pinmux;
+  assign _unused_appspi_pinmux = ^{out_to_pins[OUT_PIN_APPSPI_D0],
+                                   out_to_pins[OUT_PIN_APPSPI_CLK],
+                                   out_to_pins[OUT_PIN_APPSPI_CS]};
   // MicroSD pins now driven by native SD controller, not pinmux
 
   // Pinmux inout Pins

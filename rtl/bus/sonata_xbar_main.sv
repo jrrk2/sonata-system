@@ -60,7 +60,11 @@ module sonata_xbar_main
   output tlul_pkg::tl_h2d_t tl_rv_plic_o,
   input  tlul_pkg::tl_d2h_t tl_rv_plic_i,
   output tlul_pkg::tl_h2d_t tl_sd_o,
-  input  tlul_pkg::tl_d2h_t tl_sd_i
+  input  tlul_pkg::tl_d2h_t tl_sd_i,
+  output tlul_pkg::tl_h2d_t tl_flash_xip_o,
+  input  tlul_pkg::tl_d2h_t tl_flash_xip_i,
+  output tlul_pkg::tl_h2d_t tl_flash_xip_reg_o,
+  input  tlul_pkg::tl_d2h_t tl_flash_xip_reg_i
 );
 
   xbar_main xbar (
@@ -127,6 +131,10 @@ module sonata_xbar_main
     .tl_rv_plic_i     (tl_rv_plic_i),
     .tl_sd_o          (tl_sd_o),
     .tl_sd_i          (tl_sd_i),
+    .tl_flash_xip_o   (tl_flash_xip_o),
+    .tl_flash_xip_i   (tl_flash_xip_i),
+    .tl_flash_xip_reg_o (tl_flash_xip_reg_o),
+    .tl_flash_xip_reg_i (tl_flash_xip_reg_i),
 
     .scanmode_i       (prim_mubi_pkg::MuBi4False)
   );

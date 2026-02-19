@@ -36,6 +36,8 @@
 //     -> asf_30
 //       -> usbdev
 //     -> rv_plic
+//     -> sm1_32
+//       -> flash_xip
 // dbg_host
 //   -> s1n_31
 //     -> sm1_27
@@ -44,6 +46,8 @@
 //       -> hyperram
 //     -> sm1_29
 //       -> system_info
+//     -> sm1_32
+//       -> flash_xip
 
 module xbar_main (
   input clk_sys_i,
@@ -108,6 +112,10 @@ module xbar_main (
   input  tlul_pkg::tl_d2h_t tl_rv_plic_i,
   output tlul_pkg::tl_h2d_t tl_sd_o,
   input  tlul_pkg::tl_d2h_t tl_sd_i,
+  output tlul_pkg::tl_h2d_t tl_flash_xip_o,
+  input  tlul_pkg::tl_d2h_t tl_flash_xip_i,
+  output tlul_pkg::tl_h2d_t tl_flash_xip_reg_o,
+  input  tlul_pkg::tl_d2h_t tl_flash_xip_reg_i,
 
   input prim_mubi_pkg::mubi4_t scanmode_i
 );
@@ -124,8 +132,8 @@ module xbar_main (
   tl_d2h_t tl_s1n_26_us_d2h ;
 
 
-  tl_h2d_t tl_s1n_26_ds_h2d [25];
-  tl_d2h_t tl_s1n_26_ds_d2h [25];
+  tl_h2d_t tl_s1n_26_ds_h2d [27];
+  tl_d2h_t tl_s1n_26_ds_d2h [27];
 
   // Create steering signal
   logic [4:0] dev_sel_s1n_26;
@@ -156,15 +164,21 @@ module xbar_main (
   tl_h2d_t tl_asf_30_ds_h2d ;
   tl_d2h_t tl_asf_30_ds_d2h ;
 
+  tl_h2d_t tl_sm1_32_us_h2d [2];
+  tl_d2h_t tl_sm1_32_us_d2h [2];
+
+  tl_h2d_t tl_sm1_32_ds_h2d ;
+  tl_d2h_t tl_sm1_32_ds_d2h ;
+
   tl_h2d_t tl_s1n_31_us_h2d ;
   tl_d2h_t tl_s1n_31_us_d2h ;
 
 
-  tl_h2d_t tl_s1n_31_ds_h2d [3];
-  tl_d2h_t tl_s1n_31_ds_d2h [3];
+  tl_h2d_t tl_s1n_31_ds_h2d [4];
+  tl_d2h_t tl_s1n_31_ds_d2h [4];
 
   // Create steering signal
-  logic [1:0] dev_sel_s1n_31;
+  logic [2:0] dev_sel_s1n_31;
 
 
 
@@ -243,6 +257,12 @@ module xbar_main (
   assign tl_sd_o = tl_s1n_26_ds_h2d[24];
   assign tl_s1n_26_ds_d2h[24] = tl_sd_i;
 
+  assign tl_sm1_32_us_h2d[0] = tl_s1n_26_ds_h2d[25];
+  assign tl_s1n_26_ds_d2h[25] = tl_sm1_32_us_d2h[0];
+
+  assign tl_flash_xip_reg_o = tl_s1n_26_ds_h2d[26];
+  assign tl_s1n_26_ds_d2h[26] = tl_flash_xip_reg_i;
+
   assign tl_sm1_27_us_h2d[1] = tl_s1n_31_ds_h2d[0];
   assign tl_s1n_31_ds_d2h[0] = tl_sm1_27_us_d2h[1];
 
@@ -251,6 +271,9 @@ module xbar_main (
 
   assign tl_sm1_29_us_h2d[1] = tl_s1n_31_ds_h2d[2];
   assign tl_s1n_31_ds_d2h[2] = tl_sm1_29_us_d2h[1];
+
+  assign tl_sm1_32_us_h2d[1] = tl_s1n_31_ds_h2d[3];
+  assign tl_s1n_31_ds_d2h[3] = tl_sm1_32_us_d2h[1];
 
   assign tl_s1n_26_us_h2d = tl_ibex_lsu_i;
   assign tl_ibex_lsu_o = tl_s1n_26_us_d2h;
@@ -264,6 +287,9 @@ module xbar_main (
   assign tl_system_info_o = tl_sm1_29_ds_h2d;
   assign tl_sm1_29_ds_d2h = tl_system_info_i;
 
+  assign tl_flash_xip_o = tl_sm1_32_ds_h2d;
+  assign tl_sm1_32_ds_d2h = tl_flash_xip_i;
+
   assign tl_usbdev_o = tl_asf_30_ds_h2d;
   assign tl_asf_30_ds_d2h = tl_usbdev_i;
 
@@ -272,7 +298,7 @@ module xbar_main (
 
   always_comb begin
     // default steering to generate error response if address is not within the range
-    dev_sel_s1n_26 = 5'd25;
+    dev_sel_s1n_26 = 5'd27;
     if ((tl_s1n_26_us_h2d.a_address &
          ~(ADDR_MASK_SRAM)) == ADDR_SPACE_SRAM) begin
       dev_sel_s1n_26 = 5'd0;
@@ -372,23 +398,35 @@ module xbar_main (
     end else if ((tl_s1n_26_us_h2d.a_address &
                   ~(ADDR_MASK_SD)) == ADDR_SPACE_SD) begin
       dev_sel_s1n_26 = 5'd24;
+
+    end else if ((tl_s1n_26_us_h2d.a_address &
+                  ~(ADDR_MASK_FLASH_XIP_REG)) == ADDR_SPACE_FLASH_XIP_REG) begin
+      dev_sel_s1n_26 = 5'd26;
+
+    end else if ((tl_s1n_26_us_h2d.a_address &
+                  ~(ADDR_MASK_FLASH_XIP)) == ADDR_SPACE_FLASH_XIP) begin
+      dev_sel_s1n_26 = 5'd25;
 end
   end
 
   always_comb begin
     // default steering to generate error response if address is not within the range
-    dev_sel_s1n_31 = 2'd3;
+    dev_sel_s1n_31 = 3'd4;
     if ((tl_s1n_31_us_h2d.a_address &
          ~(ADDR_MASK_SRAM)) == ADDR_SPACE_SRAM) begin
-      dev_sel_s1n_31 = 2'd0;
+      dev_sel_s1n_31 = 3'd0;
 
     end else if ((tl_s1n_31_us_h2d.a_address &
                   ~(ADDR_MASK_HYPERRAM)) == ADDR_SPACE_HYPERRAM) begin
-      dev_sel_s1n_31 = 2'd1;
+      dev_sel_s1n_31 = 3'd1;
 
     end else if ((tl_s1n_31_us_h2d.a_address &
                   ~(ADDR_MASK_SYSTEM_INFO)) == ADDR_SPACE_SYSTEM_INFO) begin
-      dev_sel_s1n_31 = 2'd2;
+      dev_sel_s1n_31 = 3'd2;
+
+    end else if ((tl_s1n_31_us_h2d.a_address &
+                  ~(ADDR_MASK_FLASH_XIP)) == ADDR_SPACE_FLASH_XIP) begin
+      dev_sel_s1n_31 = 3'd3;
 end
   end
 
@@ -397,11 +435,11 @@ end
   tlul_socket_1n #(
     .HReqDepth (4'h0),
     .HRspDepth (4'h0),
-    .DReqPass  (25'h1781d47),
-    .DRspPass  (25'h1781d47),
-    .DReqDepth (100'h1100001111110001010111000),
-    .DRspDepth (100'h1100001111110001010111000),
-    .N         (25)
+    .DReqPass  (27'h7781d47),
+    .DRspPass  (27'h7781d47),
+    .DReqDepth (108'h111100001111110001010111000),
+    .DRspDepth (108'h111100001111110001010111000),
+    .N         (27)
   ) u_s1n_26 (
     .clk_i        (clk_sys_i),
     .rst_ni       (rst_sys_ni),
@@ -453,6 +491,20 @@ end
     .tl_d_o       (tl_sm1_29_ds_h2d),
     .tl_d_i       (tl_sm1_29_ds_d2h)
   );
+  tlul_socket_m1 #(
+    .HReqDepth (8'h0),
+    .HRspDepth (8'h0),
+    .DReqDepth (4'h0),
+    .DRspDepth (4'h0),
+    .M         (2)
+  ) u_sm1_32 (
+    .clk_i        (clk_sys_i),
+    .rst_ni       (rst_sys_ni),
+    .tl_h_i       (tl_sm1_32_us_h2d),
+    .tl_h_o       (tl_sm1_32_us_d2h),
+    .tl_d_o       (tl_sm1_32_ds_h2d),
+    .tl_d_i       (tl_sm1_32_ds_d2h)
+  );
   tlul_fifo_async #(
     .ReqDepth        (1),
     .RspDepth        (1)
@@ -469,9 +521,9 @@ end
   tlul_socket_1n #(
     .HReqPass  (1'b0),
     .HRspPass  (1'b0),
-    .DReqDepth (12'h0),
-    .DRspDepth (12'h0),
-    .N         (3)
+    .DReqDepth (16'h0),
+    .DRspDepth (16'h0),
+    .N         (4)
   ) u_s1n_31 (
     .clk_i        (clk_sys_i),
     .rst_ni       (rst_sys_ni),

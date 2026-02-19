@@ -11,6 +11,7 @@
 //     -> sram
 //     -> hyperram
 //     -> dbg_dev
+//     -> flash_xip
 
 module xbar_ifetch (
   input clk_sys_i,
@@ -27,6 +28,8 @@ module xbar_ifetch (
   input  tlul_pkg::tl_d2h_t tl_hyperram_i,
   output tlul_pkg::tl_h2d_t tl_dbg_dev_o,
   input  tlul_pkg::tl_d2h_t tl_dbg_dev_i,
+  output tlul_pkg::tl_h2d_t tl_flash_xip_o,
+  input  tlul_pkg::tl_d2h_t tl_flash_xip_i,
 
   input prim_mubi_pkg::mubi4_t scanmode_i
 );
@@ -43,11 +46,11 @@ module xbar_ifetch (
   tl_d2h_t tl_s1n_4_us_d2h ;
 
 
-  tl_h2d_t tl_s1n_4_ds_h2d [3];
-  tl_d2h_t tl_s1n_4_ds_d2h [3];
+  tl_h2d_t tl_s1n_4_ds_h2d [4];
+  tl_d2h_t tl_s1n_4_ds_d2h [4];
 
   // Create steering signal
-  logic [1:0] dev_sel_s1n_4;
+  logic [2:0] dev_sel_s1n_4;
 
 
 
@@ -60,23 +63,30 @@ module xbar_ifetch (
   assign tl_dbg_dev_o = tl_s1n_4_ds_h2d[2];
   assign tl_s1n_4_ds_d2h[2] = tl_dbg_dev_i;
 
+  assign tl_flash_xip_o = tl_s1n_4_ds_h2d[3];
+  assign tl_s1n_4_ds_d2h[3] = tl_flash_xip_i;
+
   assign tl_s1n_4_us_h2d = tl_ibex_ifetch_i;
   assign tl_ibex_ifetch_o = tl_s1n_4_us_d2h;
 
   always_comb begin
     // default steering to generate error response if address is not within the range
-    dev_sel_s1n_4 = 2'd3;
+    dev_sel_s1n_4 = 3'd4;
     if ((tl_s1n_4_us_h2d.a_address &
          ~(ADDR_MASK_SRAM)) == ADDR_SPACE_SRAM) begin
-      dev_sel_s1n_4 = 2'd0;
+      dev_sel_s1n_4 = 3'd0;
 
     end else if ((tl_s1n_4_us_h2d.a_address &
                   ~(ADDR_MASK_HYPERRAM)) == ADDR_SPACE_HYPERRAM) begin
-      dev_sel_s1n_4 = 2'd1;
+      dev_sel_s1n_4 = 3'd1;
 
     end else if ((tl_s1n_4_us_h2d.a_address &
                   ~(ADDR_MASK_DBG_DEV)) == ADDR_SPACE_DBG_DEV) begin
-      dev_sel_s1n_4 = 2'd2;
+      dev_sel_s1n_4 = 3'd2;
+
+    end else if ((tl_s1n_4_us_h2d.a_address &
+                  ~(ADDR_MASK_FLASH_XIP)) == ADDR_SPACE_FLASH_XIP) begin
+      dev_sel_s1n_4 = 3'd3;
 end
   end
 
@@ -85,11 +95,11 @@ end
   tlul_socket_1n #(
     .HReqDepth (4'h0),
     .HRspDepth (4'h0),
-    .DReqPass  (3'h3),
-    .DRspPass  (3'h3),
-    .DReqDepth (12'h100),
-    .DRspDepth (12'h100),
-    .N         (3)
+    .DReqPass  (4'hF),
+    .DRspPass  (4'hF),
+    .DReqDepth (16'h1100),
+    .DRspDepth (16'h1100),
+    .N         (4)
   ) u_s1n_4 (
     .clk_i        (clk_sys_i),
     .rst_ni       (rst_sys_ni),

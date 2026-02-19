@@ -37,6 +37,7 @@ filesets:
       - rtl/ip/sd/sd_clock_divider.v
       - rtl/ip/sd/sd_top.sv
       - rtl/ip/sd/sd_tl.sv
+      - rtl/ip/spi_flash_xip/spi_flash_xip.sv
       - rtl/system/sonata_pkg.sv
       - rtl/bus/sonata_xbar_main.sv
       - rtl/system/jtag_id_pkg.sv
