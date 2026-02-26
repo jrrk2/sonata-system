@@ -192,7 +192,11 @@ targets:
           - '--trace-max-array 1024'
           # For a faster simulation using the SRAM model:
           - '-CFLAGS "-Wall -DVM_TRACE_FMT_FST -DTOPLEVEL_NAME=top_verilator -DUSE_HYPERRAM_SRAM_MODEL"'
-          - '-DETH_MAC_MODEL'
+          # Disabled to boost simulation speed: ethernet and microSD models
+          # add socket/DPI overhead on every SPI transaction.
+          # Re-enable with -DETH_MAC_MODEL and -DSIM_MICROSD_MODEL when needed.
+          #- '-DETH_MAC_MODEL'
+          #- '-DSIM_MICROSD_MODEL'
           # For a more accurate simulation using the HyperBus controller itself or correct USB frequency:
           # - '-CFLAGS "-Wall -DVM_TRACE_FMT_FST -DTOPLEVEL_NAME=top_verilator -DUSE_SEPARATED_CLOCKS"'
           - '-LDFLAGS "-pthread -lutil -lelf"'

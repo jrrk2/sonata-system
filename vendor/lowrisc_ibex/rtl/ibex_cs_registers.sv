@@ -92,9 +92,10 @@ module ibex_cs_registers import cheri_pkg::*;  #(
   output logic [31:0]          csr_mepc_o,
 
   // PMP
-  output ibex_pkg::pmp_cfg_t     csr_pmp_cfg_o  [PMPNumRegions],
-  output logic [33:0]            csr_pmp_addr_o [PMPNumRegions],
+  output ibex_pkg::pmp_cfg_t     csr_pmp_cfg_o    [PMPNumRegions],
+  output logic [33:0]            csr_pmp_addr_o   [PMPNumRegions],
   output ibex_pkg::pmp_mseccfg_t csr_pmp_mseccfg_o,
+  output logic [31:0]            csr_pmp_offset_o [PMPNumRegions],
 
   // debug
   input  logic                 debug_mode_i,
@@ -269,8 +270,9 @@ module ibex_cs_registers import cheri_pkg::*;  #(
   logic  [5:0] mstack_cause_q, mstack_cause_d;
 
   // PMP Signals
-  logic [31:0]                 pmp_addr_rdata  [PMP_MAX_REGIONS];
-  logic [PMP_CFG_W-1:0]        pmp_cfg_rdata   [PMP_MAX_REGIONS];
+  logic [31:0]                 pmp_addr_rdata   [PMP_MAX_REGIONS];
+  logic [31:0]                 pmp_offset_rdata [PMP_MAX_REGIONS];
+  logic [PMP_CFG_W-1:0]        pmp_cfg_rdata    [PMP_MAX_REGIONS];
   logic                        pmp_csr_err;
   pmp_mseccfg_t                pmp_mseccfg;
 
@@ -476,6 +478,24 @@ module ibex_cs_registers import cheri_pkg::*;  #(
       CSR_PMPADDR13: csr_rdata_int = pmp_addr_rdata[13];
       CSR_PMPADDR14: csr_rdata_int = pmp_addr_rdata[14];
       CSR_PMPADDR15: csr_rdata_int = pmp_addr_rdata[15];
+
+      // PMP address offset registers (custom extension)
+      CSR_PMPOFFSET0:  csr_rdata_int = pmp_offset_rdata[0];
+      CSR_PMPOFFSET1:  csr_rdata_int = pmp_offset_rdata[1];
+      CSR_PMPOFFSET2:  csr_rdata_int = pmp_offset_rdata[2];
+      CSR_PMPOFFSET3:  csr_rdata_int = pmp_offset_rdata[3];
+      CSR_PMPOFFSET4:  csr_rdata_int = pmp_offset_rdata[4];
+      CSR_PMPOFFSET5:  csr_rdata_int = pmp_offset_rdata[5];
+      CSR_PMPOFFSET6:  csr_rdata_int = pmp_offset_rdata[6];
+      CSR_PMPOFFSET7:  csr_rdata_int = pmp_offset_rdata[7];
+      CSR_PMPOFFSET8:  csr_rdata_int = pmp_offset_rdata[8];
+      CSR_PMPOFFSET9:  csr_rdata_int = pmp_offset_rdata[9];
+      CSR_PMPOFFSET10: csr_rdata_int = pmp_offset_rdata[10];
+      CSR_PMPOFFSET11: csr_rdata_int = pmp_offset_rdata[11];
+      CSR_PMPOFFSET12: csr_rdata_int = pmp_offset_rdata[12];
+      CSR_PMPOFFSET13: csr_rdata_int = pmp_offset_rdata[13];
+      CSR_PMPOFFSET14: csr_rdata_int = pmp_offset_rdata[14];
+      CSR_PMPOFFSET15: csr_rdata_int = pmp_offset_rdata[15];
 
       CSR_DCSR: begin
         csr_rdata_int = dcsr_q;
@@ -1256,6 +1276,9 @@ module ibex_cs_registers import cheri_pkg::*;  #(
     logic [PMPNumRegions-1:0]    pmp_cfg_err;
     logic [PMPNumRegions-1:0]    pmp_addr_we;
     logic [PMPNumRegions-1:0]    pmp_addr_err;
+    logic [31:0]                 pmp_offset      [PMPNumRegions];
+    logic [PMPNumRegions-1:0]    pmp_offset_we;
+    logic [PMPNumRegions-1:0]    pmp_offset_err;
     logic                        any_pmp_entry_locked;
 
     // Expanded / qualified register read data
@@ -1295,8 +1318,9 @@ module ibex_cs_registers import cheri_pkg::*;  #(
 
       end else begin : g_other_regions
         // Non-implemented regions read as zero
-        assign pmp_cfg_rdata[i]  = '0;
-        assign pmp_addr_rdata[i] = '0;
+        assign pmp_cfg_rdata[i]    = '0;
+        assign pmp_addr_rdata[i]   = '0;
+        assign pmp_offset_rdata[i] = '0;
       end
     end
 
@@ -1372,8 +1396,30 @@ module ibex_cs_registers import cheri_pkg::*;  #(
 
       `ASSERT_INIT(PMPAddrRstLowBitsZero_A, pmp_addr_rst[i][33-PMPAddrWidth:0] == '0)
 
-      assign csr_pmp_cfg_o[i]  = pmp_cfg[i];
-      assign csr_pmp_addr_o[i] = {pmp_addr_rdata[i], 2'b00};
+      // ----------------------------
+      // Instantiate offset registers
+      // ----------------------------
+      assign pmp_offset_we[i] = csr_we_int & ~pmp_cfg_locked[i] &
+                                (csr_addr == (CSR_OFF_PMP_OFFSET + i[11:0]));
+
+      ibex_csr #(
+        .Width     (32),
+        .ShadowCopy(ShadowCSR),
+        .ResetValue('0)
+      ) u_pmp_offset_csr (
+        .clk_i     (clk_i),
+        .rst_ni    (rst_ni),
+        .wr_data_i (csr_wdata_int),
+        .wr_en_i   (pmp_offset_we[i]),
+        .rd_data_o (pmp_offset[i]),
+        .rd_error_o(pmp_offset_err[i])
+      );
+
+      assign pmp_offset_rdata[i] = pmp_offset[i];
+
+      assign csr_pmp_cfg_o[i]    = pmp_cfg[i];
+      assign csr_pmp_addr_o[i]   = {pmp_addr_rdata[i], 2'b00};
+      assign csr_pmp_offset_o[i] = pmp_offset[i];
     end
 
     assign pmp_mseccfg_we = csr_we_int & (csr_addr == CSR_MSECCFG);
@@ -1403,18 +1449,20 @@ module ibex_cs_registers import cheri_pkg::*;  #(
       .rd_error_o(pmp_mseccfg_err)
     );
 
-    assign pmp_csr_err = (|pmp_cfg_err) | (|pmp_addr_err) | pmp_mseccfg_err;
+    assign pmp_csr_err = (|pmp_cfg_err) | (|pmp_addr_err) | (|pmp_offset_err) | pmp_mseccfg_err;
     assign pmp_mseccfg = pmp_mseccfg_q;
 
   end else begin : g_no_pmp_tieoffs
     // Generate tieoffs when PMP is not configured
     for (genvar i = 0; i < PMP_MAX_REGIONS; i++) begin : g_rdata
-      assign pmp_addr_rdata[i] = '0;
-      assign pmp_cfg_rdata[i]  = '0;
+      assign pmp_addr_rdata[i]   = '0;
+      assign pmp_cfg_rdata[i]    = '0;
+      assign pmp_offset_rdata[i] = '0;
     end
     for (genvar i = 0; i < PMPNumRegions; i++) begin : g_outputs
-      assign csr_pmp_cfg_o[i]  = pmp_cfg_t'(1'b0);
-      assign csr_pmp_addr_o[i] = '0;
+      assign csr_pmp_cfg_o[i]    = pmp_cfg_t'(1'b0);
+      assign csr_pmp_addr_o[i]   = '0;
+      assign csr_pmp_offset_o[i] = '0;
     end
     assign pmp_csr_err = 1'b0;
     assign pmp_mseccfg = '0;

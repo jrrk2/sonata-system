@@ -26,6 +26,8 @@ module w25q256_model #(
 );
 
   localparam int unsigned AddrBits = $clog2(FlashSizeBytes);
+  localparam int unsigned FlashBaseAddr  = 32'h2000_0000;
+  localparam int unsigned RootfsOffset   = 32'h0040_0000;  // 0x2040_0000 - 0x2000_0000
 
   // Flash storage (byte-addressed)
   logic [7:0] mem [FlashSizeBytes];
@@ -59,6 +61,29 @@ module w25q256_model #(
     end
     if (FlashInitFile != "") begin
       $readmemh(FlashInitFile, mem);
+    end
+    // Optional plusargs for kernel and rootfs images.
+    // +flash_kernel=FILE loads at FlashBaseAddr (offset 0)
+    // +flash_rootfs=FILE loads at FlashBaseAddr + RootfsOffset
+    begin
+      string kernel_file;
+      string rootfs_file;
+      bit have_kernel;
+      bit have_rootfs;
+
+      have_kernel = $value$plusargs("flash_kernel=%s", kernel_file);
+      if (have_kernel) begin
+        $readmemh(kernel_file, mem, 0);
+      end
+
+      have_rootfs = $value$plusargs("flash_rootfs=%s", rootfs_file);
+      if (have_rootfs) begin
+        if (RootfsOffset < FlashSizeBytes) begin
+          $readmemh(rootfs_file, mem, RootfsOffset);
+        end else begin
+          $fatal(1, "rootfs offset 0x%08x outside flash size", RootfsOffset + FlashBaseAddr);
+        end
+      end
     end
   end
 

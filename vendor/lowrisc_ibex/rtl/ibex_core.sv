@@ -216,6 +216,8 @@ module ibex_core import ibex_pkg::*; import cheri_pkg::*; #(
   logic        illegal_c_insn_id;              // Illegal compressed instruction sent to ID stage
 
   logic [31:0] pc_if;                          // Program counter in IF stage
+  logic [31:0] instr_addr_if;                  // Untranslated instruction bus address from IF stage
+  logic [31:0] data_addr_lsu;                  // Untranslated data bus address from LSU
   logic [31:0] pc_id;                          // Program counter in ID stage
   logic [31:0] pc_wb;                          // Program counter in WB stage
   logic [33:0] imd_val_d_ex[2];                // Intermediate register for multicycle Ops
@@ -359,9 +361,10 @@ module ibex_core import ibex_pkg::*; import cheri_pkg::*; #(
   logic [31:0] csr_mepc, csr_depc;
 
   // PMP signals
-  logic [33:0]  csr_pmp_addr [PMPNumRegions];
-  pmp_cfg_t     csr_pmp_cfg  [PMPNumRegions];
+  logic [33:0]  csr_pmp_addr   [PMPNumRegions];
+  pmp_cfg_t     csr_pmp_cfg    [PMPNumRegions];
   pmp_mseccfg_t csr_pmp_mseccfg;
+  logic [31:0]  csr_pmp_offset [PMPNumRegions];
   logic         pmp_req_err  [PMP_NUM_CHAN];
   logic         data_req_out;
 
@@ -536,7 +539,7 @@ module ibex_core import ibex_pkg::*; import cheri_pkg::*; #(
 
     // instruction cache interface
     .instr_req_o    (instr_req_o),
-    .instr_addr_o   (instr_addr_o),
+    .instr_addr_o   (instr_addr_if),
     .instr_gnt_i    (instr_gnt_i),
     .instr_rvalid_i (instr_rvalid_i),
     .instr_rdata_i  (instr_rdata_i),
@@ -1163,7 +1166,7 @@ module ibex_core import ibex_pkg::*; import cheri_pkg::*; #(
     .data_err_i    (data_err_i),
     .data_pmp_err_i(pmp_req_err[PMP_D]),
 
-    .data_addr_o (data_addr_o),
+    .data_addr_o (data_addr_lsu),
     .data_we_o   (data_we_o),
     .data_be_o   (data_be_o),
     .data_wdata_o(data_wdata33),
@@ -1511,6 +1514,7 @@ end
     .csr_pmp_cfg_o    (csr_pmp_cfg),
     .csr_pmp_addr_o   (csr_pmp_addr),
     .csr_pmp_mseccfg_o(csr_pmp_mseccfg),
+    .csr_pmp_offset_o (csr_pmp_offset),
 
     // debug
     .csr_depc_o           (csr_depc),
@@ -1573,52 +1577,79 @@ end
 
 
   if (PMPEnable) begin : g_pmp
-    logic [33:0] pmp_req_addr [PMP_NUM_CHAN];
-    pmp_req_e    pmp_req_type [PMP_NUM_CHAN];
-    priv_lvl_e   pmp_priv_lvl [PMP_NUM_CHAN];
+    logic [33:0] pmp_req_addr  [PMP_NUM_CHAN];
+    pmp_req_e    pmp_req_type  [PMP_NUM_CHAN];
+    priv_lvl_e   pmp_priv_lvl  [PMP_NUM_CHAN];
+    logic [31:0] pmp_xlate_addr [PMP_NUM_CHAN];
+    logic [31:0] pmp_translated_addr [PMP_NUM_CHAN];
 
-    assign pmp_req_addr[PMP_I]  = {2'b00, pc_if};
-    assign pmp_req_type[PMP_I]  = PMP_ACC_EXEC;
-    assign pmp_priv_lvl[PMP_I]  = priv_mode_id;
-    assign pmp_req_addr[PMP_I2] = {2'b00, (pc_if + 32'd2)};
-    assign pmp_req_type[PMP_I2] = PMP_ACC_EXEC;
-    assign pmp_priv_lvl[PMP_I2] = priv_mode_id;
-    assign pmp_req_addr[PMP_D]  = {2'b00, data_addr_o[31:0]};
-    assign pmp_req_type[PMP_D]  = data_we_o ? PMP_ACC_WRITE : PMP_ACC_READ;
-    assign pmp_priv_lvl[PMP_D]  = priv_mode_lsu;
+    // PMP permission checks use pc_if (current instruction PC) for the instruction side,
+    // as in the original Ibex design. The translation address (pmp_xlate_addr) is the
+    // actual bus address from the ICache/prefetch buffer, which may differ from the check
+    // address. The PMP module pre-computes xlate_addr + offset[r] for all regions in
+    // parallel with the comparators, then selects based on the matching region — keeping
+    // the adder off the critical path.
+    assign pmp_req_addr[PMP_I]   = {2'b00, pc_if};
+    assign pmp_req_type[PMP_I]   = PMP_ACC_EXEC;
+    assign pmp_priv_lvl[PMP_I]   = priv_mode_id;
+    assign pmp_xlate_addr[PMP_I] = instr_addr_if;
+
+    assign pmp_req_addr[PMP_I2]   = {2'b00, (pc_if + 32'd2)};
+    assign pmp_req_type[PMP_I2]   = PMP_ACC_EXEC;
+    assign pmp_priv_lvl[PMP_I2]   = priv_mode_id;
+    assign pmp_xlate_addr[PMP_I2] = instr_addr_if + 32'd2;
+
+    assign pmp_req_addr[PMP_D]   = {2'b00, data_addr_lsu};
+    assign pmp_req_type[PMP_D]   = data_we_o ? PMP_ACC_WRITE : PMP_ACC_READ;
+    assign pmp_priv_lvl[PMP_D]   = priv_mode_lsu;
+    assign pmp_xlate_addr[PMP_D] = data_addr_lsu;
 
     ibex_pmp #(
       .PMPGranularity(PMPGranularity),
       .PMPNumChan    (PMP_NUM_CHAN),
       .PMPNumRegions (PMPNumRegions)
     ) pmp_i (
-      .clk_i            (clk_i),
-      .rst_ni           (rst_ni),
+      .clk_i                (clk_i),
+      .rst_ni               (rst_ni),
       // Interface to CSRs
-      .csr_pmp_cfg_i    (csr_pmp_cfg),
-      .csr_pmp_addr_i   (csr_pmp_addr),
-      .csr_pmp_mseccfg_i(csr_pmp_mseccfg),
-      .priv_mode_i      (pmp_priv_lvl),
-      // Access checking channels
-      .pmp_req_addr_i   (pmp_req_addr),
-      .pmp_req_type_i   (pmp_req_type),
-      .pmp_req_err_o    (pmp_req_err)
+      .csr_pmp_cfg_i        (csr_pmp_cfg),
+      .csr_pmp_addr_i       (csr_pmp_addr),
+      .csr_pmp_mseccfg_i    (csr_pmp_mseccfg),
+      .csr_pmp_offset_i     (csr_pmp_offset),
+      .priv_mode_i          (pmp_priv_lvl),
+      // Access checking channels (match on these addresses)
+      .pmp_req_addr_i       (pmp_req_addr),
+      .pmp_req_type_i       (pmp_req_type),
+      .pmp_req_err_o        (pmp_req_err),
+      // Translation channels (translate these addresses using matched region's offset)
+      .pmp_req_xlate_addr_i (pmp_xlate_addr),
+      .pmp_req_taddr_o      (pmp_translated_addr)
     );
+
+    // Bus addresses come directly from PMP translated output
+    assign instr_addr_o = pmp_translated_addr[PMP_I];
+    assign data_addr_o  = pmp_translated_addr[PMP_D];
   end else begin : g_no_pmp
     // Unused signal tieoff
     priv_lvl_e unused_priv_lvl_ls;
     logic [33:0] unused_csr_pmp_addr [PMPNumRegions];
     pmp_cfg_t    unused_csr_pmp_cfg  [PMPNumRegions];
     pmp_mseccfg_t unused_csr_pmp_mseccfg;
+    logic [31:0]  unused_csr_pmp_offset [PMPNumRegions];
     assign unused_priv_lvl_ls = priv_mode_lsu;
     assign unused_csr_pmp_addr = csr_pmp_addr;
     assign unused_csr_pmp_cfg = csr_pmp_cfg;
     assign unused_csr_pmp_mseccfg = csr_pmp_mseccfg;
+    assign unused_csr_pmp_offset = csr_pmp_offset;
 
     // Output tieoff
     assign pmp_req_err[PMP_I]  = 1'b0;
     assign pmp_req_err[PMP_I2] = 1'b0;
     assign pmp_req_err[PMP_D]  = 1'b0;
+
+    // No PMP: pass through untranslated addresses (identity mapping)
+    assign instr_addr_o = instr_addr_if;
+    assign data_addr_o  = data_addr_lsu;
   end
 
 `ifdef RVFI

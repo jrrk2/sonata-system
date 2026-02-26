@@ -559,12 +559,31 @@ package ibex_pkg;
     CSR_MSHWMB         = 12'hBC2,
     CSR_CDBG_CTRL      = 12'hBC4,
     CSR_CPUCTRL        = 12'h7C0,
-    CSR_SECURESEED     = 12'h7C1
+    CSR_SECURESEED     = 12'h7C1,
+
+    // PMP address offset registers (custom extension for lightweight address translation)
+    CSR_PMPOFFSET0     = 12'h7D0,
+    CSR_PMPOFFSET1     = 12'h7D1,
+    CSR_PMPOFFSET2     = 12'h7D2,
+    CSR_PMPOFFSET3     = 12'h7D3,
+    CSR_PMPOFFSET4     = 12'h7D4,
+    CSR_PMPOFFSET5     = 12'h7D5,
+    CSR_PMPOFFSET6     = 12'h7D6,
+    CSR_PMPOFFSET7     = 12'h7D7,
+    CSR_PMPOFFSET8     = 12'h7D8,
+    CSR_PMPOFFSET9     = 12'h7D9,
+    CSR_PMPOFFSET10    = 12'h7DA,
+    CSR_PMPOFFSET11    = 12'h7DB,
+    CSR_PMPOFFSET12    = 12'h7DC,
+    CSR_PMPOFFSET13    = 12'h7DD,
+    CSR_PMPOFFSET14    = 12'h7DE,
+    CSR_PMPOFFSET15    = 12'h7DF
   } csr_num_e;
 
   // CSR pmp-related offsets
-  parameter logic [11:0] CSR_OFF_PMP_CFG  = 12'h3A0; // pmp_cfg  @ 12'h3a0 - 12'h3a3
-  parameter logic [11:0] CSR_OFF_PMP_ADDR = 12'h3B0; // pmp_addr @ 12'h3b0 - 12'h3bf
+  parameter logic [11:0] CSR_OFF_PMP_CFG    = 12'h3A0; // pmp_cfg    @ 12'h3a0 - 12'h3a3
+  parameter logic [11:0] CSR_OFF_PMP_ADDR   = 12'h3B0; // pmp_addr   @ 12'h3b0 - 12'h3bf
+  parameter logic [11:0] CSR_OFF_PMP_OFFSET = 12'h7D0; // pmp_offset @ 12'h7d0 - 12'h7df
 
   // CSR status bits
   parameter int unsigned CSR_MSTATUS_MIE_BIT      = 3;

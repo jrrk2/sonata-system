@@ -256,7 +256,7 @@ module ibexc_top import ibex_pkg::*; import cheri_pkg::*; #(
   ibex_core #(
     .PMPEnable        (1'b1),
     .PMPGranularity   (0),
-    .PMPNumRegions    (8),
+    .PMPNumRegions    (7),
     .MHPMCounterNum   (MHPMCounterNum  ),
     .MHPMCounterWidth (MHPMCounterWidth),
     .RV32E            (RV32E),

@@ -623,6 +623,7 @@ module top_verilator #(
   );
 
   // SPI connection to microSD card.
+`ifdef SIM_MICROSD_MODEL
   spidpi #(
     .ID       ("microsd"),
     .NDevices (1),
@@ -640,6 +641,15 @@ module top_verilator #(
     .oob_in   ( ),
     .oob_out  (microsd_det)
   );
+`else
+  // No microSD model: tie CIPO high (no response) and assert card-not-present.
+  assign microsd_dat0 = 1'b1;
+  assign microsd_det  = 1'b1;
+  // Consume the SPI output signals to suppress UNUSEDSIGNAL warnings.
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire _unused_microsd = ^{microsd_clk, microsd_dat3, microsd_cmd};
+  /* verilator lint_on UNUSEDSIGNAL */
+`endif
 
   // SPI connection to PMOD SF3 flash via PMOD1 pins
   spidpi #(

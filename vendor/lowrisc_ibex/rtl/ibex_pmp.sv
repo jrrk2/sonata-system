@@ -20,11 +20,21 @@ module ibex_pmp #(
   input  logic [33:0]             csr_pmp_addr_i    [PMPNumRegions],
   input  ibex_pkg::pmp_mseccfg_t  csr_pmp_mseccfg_i,
 
+  // Per-region address offsets for lightweight address translation
+  input  logic [31:0]             csr_pmp_offset_i [PMPNumRegions],
+
   input  ibex_pkg::priv_lvl_e     priv_mode_i    [PMPNumChan],
-  // Access checking channels
+  // Access checking channels — addresses used for PMP region matching and permission checks
   input  logic [33:0]             pmp_req_addr_i [PMPNumChan],
   input  ibex_pkg::pmp_req_e      pmp_req_type_i [PMPNumChan],
-  output logic                    pmp_req_err_o  [PMPNumChan]
+  output logic                    pmp_req_err_o  [PMPNumChan],
+
+  // Translation channels — addresses to which the matched region's offset is applied.
+  // May differ from pmp_req_addr_i (e.g. instruction side checks pc_if but translates
+  // the ICache/prefetch bus address). Pre-computed in parallel with PMP matching so the
+  // adder is NOT on the critical path after the priority mux.
+  input  logic [31:0]             pmp_req_xlate_addr_i [PMPNumChan],
+  output logic [31:0]             pmp_req_taddr_o      [PMPNumChan]
 
 );
 
@@ -41,6 +51,11 @@ module ibex_pmp #(
   logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_mml_perm_check;
   logic [PMPNumChan-1:0]                      access_fault;
 
+  // Pre-computed translated addresses: xlate_addr + offset[r] for each channel and region.
+  // These adders run in parallel with the PMP comparators, keeping the addition off the
+  // critical path. The priority mux then selects from these pre-computed results.
+  logic [31:0] precomp_taddr [PMPNumChan][PMPNumRegions];
+  logic [31:0] selected_taddr [PMPNumChan];
 
   // ---------------
   // Access checking
@@ -78,6 +93,11 @@ module ibex_pmp #(
   end
 
   for (genvar c = 0; c < PMPNumChan; c++) begin : g_access_check
+    // Pre-compute translated addresses for all regions (runs in parallel with comparators)
+    for (genvar r = 0; r < PMPNumRegions; r++) begin : g_precomp
+      assign precomp_taddr[c][r] = pmp_req_xlate_addr_i[c] + csr_pmp_offset_i[r];
+    end
+
     for (genvar r = 0; r < PMPNumRegions; r++) begin : g_regions
       // Comparators are sized according to granularity
       assign region_match_eq[c][r] = (pmp_req_addr_i[c][33:PMPGranularity+2] &
@@ -148,11 +168,14 @@ module ibex_pmp #(
       end
     end
 
-    // Access fault determination / prioritization
+    // Access fault determination / prioritization / translated address selection
     always_comb begin
       // When MSECCFG.MMWP is set default deny always, otherwise allow for M-mode, deny for other
       // modes
       access_fault[c] = csr_pmp_mseccfg_i.mmwp | (priv_mode_i[c] != PRIV_LVL_M);
+
+      // Default: identity mapping when no region matches
+      selected_taddr[c] = pmp_req_xlate_addr_i[c];
 
       // PMP entries are statically prioritized, from 0 to N-1
       // The lowest-numbered PMP entry which matches an address determines accessability
@@ -170,11 +193,14 @@ module ibex_pmp #(
                 // For other modes, the lock bit doesn't matter
                 ~region_basic_perm_check[c][r];
           end
+          // Select pre-computed translated address (adder ran in parallel with matching)
+          selected_taddr[c] = precomp_taddr[c][r];
         end
       end
     end
 
-    assign pmp_req_err_o[c] = access_fault[c];
+    assign pmp_req_err_o[c]   = access_fault[c];
+    assign pmp_req_taddr_o[c] = selected_taddr[c];
   end
 
   // RLB, rule locking bypass, is only relevant to ibex_cs_registers which controls writes to the
