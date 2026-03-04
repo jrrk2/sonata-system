@@ -26,9 +26,9 @@
             CPU0: cpu@0 {
                 device_type = "cpu";
                 compatible = "riscv";
-                riscv,isa = "rv32ima_zicsr_zifencei";
+                riscv,isa = "rv32ima";
                 riscv,isa-base = "rv32i";
-                riscv,isa-extensions = "a", "i", "m", "zicsr", "zifencei";
+                riscv,isa-extensions = "a", "i", "m";
                 mmu-type = "riscv,sv32";
                 reg = <0>;
                 clock-frequency = <50000000>;
@@ -44,11 +44,11 @@
 
                 
                 tlb-split;
-                d-tlb-size = <16>;
-                d-tlb-sets = <16>;
+                d-tlb-size = <4>;
+                d-tlb-sets = <4>;
 
-                i-tlb-size = <16>;
-                i-tlb-sets = <16>;
+                i-tlb-size = <4>;
+                i-tlb-sets = <4>;
 
                 
                 L0: interrupt-controller {
@@ -59,8 +59,51 @@
                 };
             };
 
-            
-            
+            CPU1: cpu@1 {
+                device_type = "cpu";
+                compatible = "riscv";
+                riscv,isa = "rv32ima";
+                riscv,isa-base = "rv32i";
+                riscv,isa-extensions = "a", "i", "m";
+                mmu-type = "riscv,sv32";
+                reg = <1>;
+                clock-frequency = <50000000>;
+                status = "okay";
+
+                d-cache-size = <8192>;
+                d-cache-sets = <64>;
+                d-cache-block-size = <64>;
+
+                i-cache-size = <8192>;
+                i-cache-sets = <64>;
+                i-cache-block-size = <64>;
+
+                tlb-split;
+                d-tlb-size = <4>;
+                d-tlb-sets = <4>;
+
+                i-tlb-size = <4>;
+                i-tlb-sets = <4>;
+
+                L1: interrupt-controller {
+                    #address-cells = <0>;
+                    #interrupt-cells = <0x00000001>;
+                    interrupt-controller;
+                    compatible = "riscv,cpu-intc";
+                };
+            };
+
+            cpu-map {
+                cluster0 {
+                    core0 {
+                        cpu = <&CPU0>;
+                    };
+                    core1 {
+                        cpu = <&CPU1>;
+                    };
+                };
+            };
+
         };
 
         memory: memory@40000000 {
@@ -92,7 +135,8 @@
             lintc0: clint@f0010000 {
                 compatible = "riscv,clint0";
                 interrupts-extended = <
-                    &L0 3 &L0 7>;
+                    &L0 3 &L0 7
+                    &L1 3 &L1 7>;
                 reg = <0xf0010000 0x10000>;
                 reg-names = "control";
             };
@@ -104,7 +148,8 @@
                 #interrupt-cells = <1>;
                 interrupt-controller;
                 interrupts-extended = <
-                    &L0 11 &L0 9>;
+                    &L0 11 &L0 9
+                    &L1 11 &L1 9>;
                 riscv,ndev = <32>;
                 
             };

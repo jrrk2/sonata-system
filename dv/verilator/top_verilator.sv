@@ -130,12 +130,81 @@ module top_verilator #(
   wire usb_dp_pullup; // D+ pullup enable.
   wire usb_dn_pullup; // D- pullup enable.
 
-  // QSPI flash XIP interface (directly from spi_flash_xip controller).
-  wire        spi_flash_clk;
+  // QSPI flash DDR pad interface — core-side signals from sonata_system
+  wire        spi_flash_clk_d1;
+  wire        spi_flash_clk_d2;
   wire        spi_flash_cs_n;
-  wire  [3:0] spi_flash_d_o;
-  wire  [3:0] spi_flash_d_i;
+  wire  [3:0] spi_flash_d_d1;
+  wire  [3:0] spi_flash_d_d2;
+  wire  [3:0] spi_flash_d_q1;
+  wire  [3:0] spi_flash_d_q2;
   wire  [3:0] spi_flash_d_oe;
+
+  // Capture BRAM / IDELAY control signals
+  wire        spi_cap_arm;
+  wire        spi_cap_force_trig;
+  wire  [3:0] spi_cap_trig_sel;
+  wire        spi_cap_done;
+  wire        spi_cap_idelay_rdy;
+  wire [10:0] spi_cap_rd_addr;
+  wire [31:0] spi_cap_rd_data;
+  wire [11:0] spi_cap_length;
+  wire [31:0] spi_idelay_tap;
+  wire        spi_idelay_tap_wr;
+
+  // Pad-facing wires from spi_flash_iobuf to flash model
+  wire        appspi_clk_pad;
+  wire        appspi_cs_pad;
+  wire        appspi_d0_pad;
+  wire        appspi_d1_pad;
+  wire        appspi_d2_pad;
+  wire        appspi_d3_pad;
+
+  // spi_flash_iobuf — same as FPGA but with SimMode=1:
+  //   ODDR/IDDR/IDELAYE2 flip-flops are fully modeled via stubs.
+  //   IOBUF bypassed: flash model connects via sim_d_i/sim_d_o instead.
+  wire  [3:0] spi_flash_d_o;  // ODDR output → flash model d_i
+  wire  [3:0] spi_flash_d_i;  // flash model d_o → IDELAYE2 → IDDR
+
+  spi_flash_iobuf #(
+    .SimMode (1'b1)
+  ) u_spi_flash_iobuf (
+    .clk_sys_i       (clk_i),
+    .rst_sys_ni      (rst_ni),
+
+    .appspi_clk_o    (appspi_clk_pad),
+    .appspi_cs_o     (appspi_cs_pad),
+    .appspi_d0_io    (appspi_d0_pad),
+    .appspi_d1_io    (appspi_d1_pad),
+    .appspi_d2_io    (appspi_d2_pad),
+    .appspi_d3_io    (appspi_d3_pad),
+
+    .sim_d_i          (spi_flash_d_i),
+    .sim_d_o          (spi_flash_d_o),
+
+    .spi_clk_d1_i    (spi_flash_clk_d1),
+    .spi_clk_d2_i    (spi_flash_clk_d2),
+    .spi_cs_n_i      (spi_flash_cs_n),
+    .spi_d_d1_i      (spi_flash_d_d1),
+    .spi_d_d2_i      (spi_flash_d_d2),
+    .spi_d_q1_o      (spi_flash_d_q1),
+    .spi_d_q2_o      (spi_flash_d_q2),
+    .spi_d_oe_i      (spi_flash_d_oe),
+
+    .cap_arm_i        (spi_cap_arm),
+    .cap_force_trig_i (spi_cap_force_trig),
+    .cap_trig_sel_i   (spi_cap_trig_sel),
+    .cap_done_o       (spi_cap_done),
+    .cap_idelay_rdy_o (spi_cap_idelay_rdy),
+    .cap_rd_addr_i    (spi_cap_rd_addr),
+    .cap_rd_data_o    (spi_cap_rd_data),
+    .cap_length_i     (spi_cap_length),
+
+    .idelay_tap_i     (spi_idelay_tap),
+    .idelay_tap_wr_i  (spi_idelay_tap_wr)
+  );
+
+  wire        spi_flash_clk = appspi_clk_pad;
 
   // Legacy SPI flash pinmux signals (no longer drive flash; just consume outputs)
   assign in_from_pins[IN_PIN_APPSPI_D1] = 1'b1;
@@ -462,12 +531,25 @@ module top_verilator #(
     .rs485_tx_enable_o(rs485_tx_enable),
     .rs485_rx_enable_o(rs485_rx_enable),
 
-    // QSPI flash XIP
-    .spi_flash_clk_o   (spi_flash_clk),
-    .spi_flash_cs_n_o  (spi_flash_cs_n),
-    .spi_flash_d_o     (spi_flash_d_o),
-    .spi_flash_d_i     (spi_flash_d_i),
-    .spi_flash_d_oe_o  (spi_flash_d_oe),
+    // QSPI flash XIP DDR pad interface
+    .spi_flash_clk_d1_o     (spi_flash_clk_d1),
+    .spi_flash_clk_d2_o     (spi_flash_clk_d2),
+    .spi_flash_cs_n_o       (spi_flash_cs_n),
+    .spi_flash_d_d1_o       (spi_flash_d_d1),
+    .spi_flash_d_d2_o       (spi_flash_d_d2),
+    .spi_flash_d_q1_i       (spi_flash_d_q1),
+    .spi_flash_d_q2_i       (spi_flash_d_q2),
+    .spi_flash_d_oe_o       (spi_flash_d_oe),
+    .spi_cap_arm_o           (spi_cap_arm),
+    .spi_cap_force_trig_o    (spi_cap_force_trig),
+    .spi_cap_trig_sel_o      (spi_cap_trig_sel),
+    .spi_cap_done_i          (spi_cap_done),
+    .spi_cap_idelay_rdy_i    (spi_cap_idelay_rdy),
+    .spi_cap_rd_addr_o       (spi_cap_rd_addr),
+    .spi_cap_rd_data_i       (spi_cap_rd_data),
+    .spi_cap_length_o        (spi_cap_length),
+    .spi_idelay_tap_o        (spi_idelay_tap),
+    .spi_idelay_tap_wr_o     (spi_idelay_tap_wr),
 
     // MicroSD native SD interface
     .microsd_clk_o     (),
@@ -597,10 +679,10 @@ module top_verilator #(
     .FlashInitFile  ( ""               )  // Default: incrementing pattern
   ) u_w25q256 (
     .sck_i   (spi_flash_clk),
-    .cs_ni   (spi_flash_cs_n),
+    .cs_ni   (appspi_cs_pad),
     .d_i     (spi_flash_d_o),
     .d_o     (spi_flash_d_i),
-    .d_oe_i  (spi_flash_d_oe)
+    .d_oe_i  (spi_flash_d_oe)  // flash model ignores this, but matches port
   );
 
   // SPI connection to LCD.

@@ -56,12 +56,16 @@ filesets:
       - dv/dpi/spidpi/spi_microsd.hh: { file_type: cppSource, is_include_file: true }
       - dv/models/flash/w25q256_model.sv: { file_type: systemVerilogSource }
       - dv/models/hyperram/rtl/hyperram_W956.sv: { file_type: systemVerilogSource }
+      - dv/models/fpga/rtl/BUFG.v: { file_type: systemVerilogSource }
+      - dv/models/fpga/rtl/IDDR.v: { file_type: systemVerilogSource }
+      - dv/models/fpga/rtl/IDELAYCTRL.v: { file_type: systemVerilogSource }
+      - dv/models/fpga/rtl/IDELAYE2.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/IOBUF.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/ISERDESE2.v: { file_type: systemVerilogSource }
+      - dv/models/fpga/rtl/MMCME2_BASE.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/OBUF.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/ODDR.v: { file_type: systemVerilogSource }
       - dv/models/fpga/rtl/RAMB36E1.v: { file_type: systemVerilogSource }
-      - dv/models/fpga/rtl/BUFG.v: { file_type: systemVerilogSource }
       - dv/models/ethernet/ksz8851snl_mac.h: { file_type: systemVerilogSource, is_include_file: true }
       - dv/models/ethernet/ksz8851snl_mac_model.v: { file_type: systemVerilogSource }
       - dv/models/ethernet/axis_gmii_rx.v: { file_type: systemVerilogSource }
@@ -136,6 +140,11 @@ parameters:
     paramtype: vlogdefine
     description: Enable RISC-V Formal Interface for instruction tracing.
 
+  SPI_CAPTURE_EN:
+    datatype: bool
+    paramtype: vlogdefine
+    description: Enable SPI flash capture BRAM, MMCM, IDELAYCTRL and IDELAYE2 in spi_flash_iobuf.
+
 targets:
   default: &default_target
     filesets:
@@ -155,6 +164,7 @@ targets:
     parameters:
       - SRAMInitFile
       - PRIM_DEFAULT_IMPL=prim_pkg::ImplXilinx
+      - SPI_CAPTURE_EN=true
 
   synth_xl:
     <<: *default_target
@@ -172,6 +182,7 @@ targets:
       - PRIM_DEFAULT_IMPL=prim_pkg::ImplXilinx
       - USE_HYPERRAM_SRAM_MODEL=true
       - TARGET_XL_BOARD=true
+      - SPI_CAPTURE_EN=true
 
   sim:
     <<: *default_target
@@ -213,6 +224,7 @@ targets:
       - USE_SEPARATED_CLOCKS=false
       - PRIM_DEFAULT_IMPL=prim_pkg::ImplGeneric
       - RVFI=true
+      - SPI_CAPTURE_EN=true
 
   lint:
     <<: *default_target

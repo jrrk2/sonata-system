@@ -51,6 +51,8 @@ module clkgen_sonata  #(
     .O (io_clk_buf)
   );
 
+  // CLKOUT5 (formerly 80 MHz SPI clock) removed — SPI flash uses DDR pads on clk_sys.
+  // The unused CLKOUT5 output is left unconnected.
   PLLE2_ADV #(
     .BANDWIDTH            ("OPTIMIZED"),
     .COMPENSATION         ("ZHOLD"),
@@ -79,6 +81,11 @@ module clkgen_sonata  #(
     .CLKOUT4_PHASE        (0.000),
     .CLKOUT4_DUTY_CYCLE   (0.500),
 
+    // CLKOUT5 unused (formerly 80 MHz SPI serializer clock)
+    .CLKOUT5_DIVIDE       (15),
+    .CLKOUT5_PHASE        (0.000),
+    .CLKOUT5_DUTY_CYCLE   (0.500),
+
     .CLKIN1_PERIOD        (40.000)
   ) pll (
     .CLKFBOUT            (clk_fb_unbuf),
@@ -87,7 +94,7 @@ module clkgen_sonata  #(
     .CLKOUT2             (clk_hr_unbuf),
     .CLKOUT3             (clk_hr90p_unbuf),
     .CLKOUT4             (clk_hr3x_unbuf),
-    .CLKOUT5             (),
+    .CLKOUT5             (),  // Unused — SPI uses DDR pads on clk_sys
      // Input clock control
     .CLKFBIN             (clk_fb_buf),
     .CLKIN1              (io_clk_buf),

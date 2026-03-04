@@ -18,8 +18,7 @@ package sonata_pkg;
   localparam int unsigned PWM_OUT_WIDTH = 7;
   localparam int unsigned SPI_CS_WIDTH = 4;
 
-  // Instance-specific GPIO core input/output widths.
-  // Include the fixed (non-pinmux) GPIO used for on-board peripherals.
+  // Per-instance GPIO widths (GPIO_NUM + 1 for the fixed instance [0])
   // Each must be less than GPIO_IOS_WIDTH.
   localparam int unsigned GPIO_INST_IN_WIDTH[GPIO_NUM+1]  = {17, 28, 14, 8, 8, 6};
   localparam int unsigned GPIO_INST_OUT_WIDTH[GPIO_NUM+1] = { 8, 28, 14, 8, 8, 6};

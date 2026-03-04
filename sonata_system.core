@@ -38,13 +38,14 @@ filesets:
       - rtl/ip/sd/sd_top.sv
       - rtl/ip/sd/sd_tl.sv
       - rtl/ip/spi_flash_xip/spi_flash_xip.sv
+      - rtl/ip/spi_flash_xip/spi_flash_iobuf.sv
       - rtl/system/sonata_pkg.sv
       - rtl/bus/sonata_xbar_main.sv
       - rtl/system/jtag_id_pkg.sv
       - rtl/system/sonata_system.sv
       - rtl/system/dm_top.sv
       - rtl/system/debounce.sv
-      - rtl/system/pinmux.sv
+      - rtl/system/pinmux_fixed.sv
       - rtl/system/pwm_fade.sv
       - rtl/system/sram.sv
       - rtl/system/rst_sync.sv

@@ -105,12 +105,29 @@ module sonata_system
   output wire                      rs485_rx_enable_o,
   output wire                      rs485_tx_enable_o,
 
-  // QSPI flash XIP interface
-  output logic                     spi_flash_clk_o,
+  // QSPI flash XIP DDR pad interface (all clocked by clk_sys via DDR pads)
+  output logic                     spi_flash_clk_d1_o,
+  output logic                     spi_flash_clk_d2_o,
   output logic                     spi_flash_cs_n_o,
-  output logic [3:0]               spi_flash_d_o,
-  input  logic [3:0]               spi_flash_d_i,
+  output logic [3:0]               spi_flash_d_d1_o,
+  output logic [3:0]               spi_flash_d_d2_o,
+  input  logic [3:0]               spi_flash_d_q1_i,
+  input  logic [3:0]               spi_flash_d_q2_i,
   output logic [3:0]               spi_flash_d_oe_o,
+
+  // Capture BRAM control (directly wired to spi_flash_iobuf)
+  output logic                     spi_cap_arm_o,
+  output logic                     spi_cap_force_trig_o,
+  output logic [3:0]               spi_cap_trig_sel_o,
+  input  logic                     spi_cap_done_i,
+  input  logic                     spi_cap_idelay_rdy_i,
+  output logic [10:0]              spi_cap_rd_addr_o,
+  input  logic [31:0]              spi_cap_rd_data_i,
+  output logic [11:0]              spi_cap_length_o,
+
+  // IDELAY tap control
+  output logic [31:0]              spi_idelay_tap_o,
+  output logic                     spi_idelay_tap_wr_o,
 
   // MicroSD native SD interface
   output logic                     microsd_clk_o,
@@ -1297,20 +1314,32 @@ module sonata_system
   spi_flash_xip #(
     .AddrWidth     ( 25 ), // 32 MB
     .DataWidth     ( 32 ),
-    .SpiClkDiv     ( 3  ), // sys_clk/8 = 5 MHz SPI (with 40 MHz sys)
     .LineSizeBytes ( 32 )  // 32-byte prefetch line
   ) u_spi_flash_xip (
-    .clk_i      (clk_sys_i),
-    .rst_ni     (rst_sys_ni),
-    .tl_i       (tl_flash_xip_ds_h2d),
-    .tl_o       (tl_flash_xip_ds_d2h),
-    .tl_reg_i   (tl_flash_xip_reg_h2d),
-    .tl_reg_o   (tl_flash_xip_reg_d2h),
-    .spi_clk_o  (spi_flash_clk_o),
-    .spi_cs_n_o (spi_flash_cs_n_o),
-    .spi_d_o    (spi_flash_d_o),
-    .spi_d_i    (spi_flash_d_i),
-    .spi_d_oe_o (spi_flash_d_oe_o)
+    .clk_i              (clk_sys_i),
+    .rst_ni             (rst_sys_ni),
+    .tl_i               (tl_flash_xip_ds_h2d),
+    .tl_o               (tl_flash_xip_ds_d2h),
+    .tl_reg_i           (tl_flash_xip_reg_h2d),
+    .tl_reg_o           (tl_flash_xip_reg_d2h),
+    .spi_clk_d1_o       (spi_flash_clk_d1_o),
+    .spi_clk_d2_o       (spi_flash_clk_d2_o),
+    .spi_cs_n_o         (spi_flash_cs_n_o),
+    .spi_d_d1_o         (spi_flash_d_d1_o),
+    .spi_d_d2_o         (spi_flash_d_d2_o),
+    .spi_d_q1_i         (spi_flash_d_q1_i),
+    .spi_d_q2_i         (spi_flash_d_q2_i),
+    .spi_d_oe_o         (spi_flash_d_oe_o),
+    .cap_arm_o          (spi_cap_arm_o),
+    .cap_force_trig_o   (spi_cap_force_trig_o),
+    .cap_trig_sel_o     (spi_cap_trig_sel_o),
+    .cap_done_i         (spi_cap_done_i),
+    .cap_idelay_rdy_i   (spi_cap_idelay_rdy_i),
+    .cap_rd_addr_o      (spi_cap_rd_addr_o),
+    .cap_rd_data_i      (spi_cap_rd_data_i),
+    .cap_length_o       (spi_cap_length_o),
+    .idelay_tap_o       (spi_idelay_tap_o),
+    .idelay_tap_wr_o    (spi_idelay_tap_wr_o)
   );
 
   system_info #(
@@ -1379,15 +1408,10 @@ module sonata_system
   // is handled by the rs485_ctrl module in the hierarchy above sonata_system but that module
   // requires rx_enable and tx_enable inputs which are provided below.
 
-  // Enable the RS-485 receiver any time the RS-485 RX input is connect to the UART via pinmux.
-  // Whether or not we are transmitting does not need to be factored in here as that is dealt with
-  // via rs485_ctrl.
-  assign rs485_rx_enable_o = u_pinmux.uart_rx_2_sel[3];
-
-  // Transmission enabled when UART is muxed to RS-485 TX output and UART is actively transmitting.
-  assign rs485_tx_enable_o = u_pinmux.rs485_tx_sel[1]                           &
-                             gen_uart_blocks[2].u_uart.uart_core.tx_enable      &
-                             ~gen_uart_blocks[2].u_uart.hw2reg.status.txidle.d;
+  // With fixed-routing pinmux, RS-485 is not connected by default (RS-232 is the
+  // default for UART2 RX, and RS-485 TX is disabled at reset).
+  assign rs485_rx_enable_o = 1'b0;
+  assign rs485_tx_enable_o = 1'b0;
 
   for (genvar i = 0; i < NrDevices; i++) begin : gen_unused_device
     if (i != RevTags) begin

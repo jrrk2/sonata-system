@@ -1,43 +1,85 @@
 /*
- * Minimal M-mode stub for LiteX VexRiscv on Sonata FPGA
+ * Minimal M-mode stub for LiteX VexRiscv SMP on Sonata FPGA
  *
- * Replaces OpenSBI (260KB) with ~1KB.  The init code runs once from
+ * Replaces OpenSBI (260KB) with ~2KB.  The init code runs once from
  * HyperRAM, copies the trap handler to SRAM (0x10000000, invisible to
  * Linux), sets up PMP/delegation, then mrets into S-mode.
  *
+ * SMP support: hart 0 boots the kernel; hart 1 is parked in SRAM
+ * until Linux calls SBI HSM hart_start().
+ *
  * The resident trap handler in SRAM handles:
- *   - SBI ecalls from S-mode (timer, base extension)
+ *   - SBI ecalls from S-mode (timer, base, HSM, IPI extensions)
  *   - M-mode timer interrupts (injects STIP)
+ *   - M-mode software interrupts (injects SSIP for IPI)
  *   - Illegal instruction (emulates rdtime/rdtimeh, forwards others)
  */
 
 /* ── Constants ─────────────────────────────────────────────────────── */
 
 .equ SRAM_BASE,         0x10000000
-.equ SRAM_TRAP_STACK,   0x10000800
 
-.equ CLINT_MTIMECMP,    0xf0014000
+/*
+ * SRAM layout (6KB = 0x10000000 - 0x100017FF):
+ *   0x10000000 - 0x100007FF: trap handler code (2KB)
+ *   0x10000800 - 0x1000083F: shared SMP data (64 bytes)
+ *   0x10000C00:              hart 0 mscratch (stack grows down, 128B frame)
+ *   0x10001400:              hart 1 mscratch (stack grows down, 128B frame)
+ */
+.equ SRAM_SHARED,       0x10000800
+.equ SRAM_STACK_H0,     0x10000C00
+.equ SRAM_STACK_H1,     0x10001400
+
+/*
+ * Shared data layout at SRAM_SHARED:
+ *   +0x00: hart 0 HSM state     (4 bytes)
+ *   +0x04: hart 1 HSM state     (4 bytes)
+ *   +0x08: hart 1 start_addr    (4 bytes)
+ *   +0x0C: hart 1 opaque (a1)   (4 bytes)
+ *   +0x10: init_done flag        (4 bytes) — set by hart 0 after init
+ */
+.equ SHARED_H0_STATE,   0x00
+.equ SHARED_H1_STATE,   0x04
+.equ SHARED_H1_ENTRY,   0x08
+.equ SHARED_H1_OPAQUE,  0x0C
+.equ SHARED_INIT_DONE,  0x10
+
+/* HSM states */
+.equ HSM_STARTED,       0
+.equ HSM_STOPPED,       1
+.equ HSM_START_PENDING, 2
+
+.equ CLINT_BASE,        0xf0010000
+.equ CLINT_MSIP_BASE,   0xf0010000    /* msip[hart] at base + hart*4 */
+.equ CLINT_MTIMECMP,    0xf0014000    /* mtimecmp[hart] at base + hart*8 */
 .equ CLINT_MTIME,       0xf001BFF8
 
 /*
- * A/B flash layout (32MB SPI NOR at 0x02000000):
- *   Slot A: 0x02000000 - 0x023FFFFF  (4MB) — kernel A
- *   Slot B: 0x02400000 - 0x027FFFFF  (4MB) — kernel B
- *   rootfs: 0x02800000 - onwards     — shared romfs
- *   Flags:  0x027FFFF0 (16 bytes)    — boot selection flags
+ * Boot entry addresses:
+ *   HyperRAM:  0x40000000 — kernel loaded by BIOS from SD card
+ *   Flash A:   0x02001000 — XIP kernel slot A (stub occupies first 4K)
+ *   Flash B:   0x02401000 — XIP kernel slot B (stub occupies first 4K)
+ *   rootfs:    0x02800000 — shared romfs in flash
  *
- * Flag byte at BOOT_FLAGS_ADDR:
- *   0x00 or 0xFF (erased) = boot slot A (default)
- *   0x42 ('B')            = boot slot B
- *   anything else         = boot slot A
+ * Flash layout per slot: [4K M-mode stub | xipImage]
+ * The stub is prepended to the kernel image so the combined binary
+ * can be written to flash as a single file.  The BIOS (or direct
+ * flash boot) enters at the start of the stub, which sets up M-mode
+ * and mrets into the kernel at +0x1000.
+ *
+ * Boot selection via SELSW DIP switches (active-low, active = pressed):
+ *   No switch pressed (default): boot from HyperRAM 0x40000000 (SD card)
+ *   SELSW[0] pressed:            XIP flash slot A (0x02001000)
+ *   SELSW[1] pressed:            XIP flash slot B (0x02401000)
+ *
+ * Switches are read from LiteX GPIOIn CSR at SWITCHES_IN.
  */
 .equ FLASH_BASE,        0x02000000
-.equ SLOT_A_ENTRY,      0x02000000
-.equ SLOT_B_ENTRY,      0x02400000
-.equ BOOT_FLAGS_ADDR,   0x027FFFF0
-.equ BOOT_FLAG_B,       0x42          /* 'B' = boot slot B */
+.equ RAM_ENTRY,         0x40000000
+.equ SLOT_A_ENTRY,      0x02001000  /* flash base + 4K stub */
+.equ SLOT_B_ENTRY,      0x02401000  /* flash base + 4K stub */
 
-.equ DTB_ADDR,          0x40770000
+.equ SWITCHES_IN,       0xf0004800    /* LiteX GPIOIn CSR (3-bit, active-low) */
 
 .equ UART_BASE,         0xf0001000
 .equ UART_RXTX,         0x00
@@ -46,6 +88,8 @@
 .equ SBI_EXT_0_1_SET_TIMER, 0x0
 .equ SBI_EXT_BASE,          0x10
 .equ SBI_EXT_TIME,          0x54494D45
+.equ SBI_EXT_HSM,           0x48534D
+.equ SBI_EXT_IPI,           0x735049
 
 .equ SBI_BASE_GET_SPEC_VERSION, 0
 .equ SBI_BASE_GET_IMP_ID,       1
@@ -55,15 +99,25 @@
 .equ SBI_BASE_GET_MARCHID,      5
 .equ SBI_BASE_GET_MIMPID,       6
 
+.equ SBI_HSM_HART_START,      0
+.equ SBI_HSM_HART_STOP,       1
+.equ SBI_HSM_HART_GET_STATUS, 2
+
 .equ SBI_SUCCESS,           0
 .equ SBI_ERR_NOT_SUPPORTED, -2
+.equ SBI_ERR_INVALID_PARAM, -3
+.equ SBI_ERR_ALREADY_AVAILABLE, -6
 
 .equ MCAUSE_ILLEGAL_INSN,  2
 .equ MCAUSE_S_ECALL,       9
+.equ MCAUSE_M_SWIRQ,       0x80000003
 .equ MCAUSE_M_TIMER_IRQ,   0x80000007
 
 .equ MSTATUS_MPP_S,        0x800
+.equ MSTATUS_MIE,          0x8
+.equ MIE_MSIE,             0x8
 .equ MIE_MTIE,             0x80
+.equ MIP_SSIP,             0x2
 .equ MIP_STIP,             0x20
 
 /*
@@ -73,7 +127,7 @@
 .equ FRAME_SIZE, 128
 
 /* ══════════════════════════════════════════════════════════════════════
- * INIT CODE (runs once from load address)
+ * INIT CODE (runs once from load address in HyperRAM)
  * ══════════════════════════════════════════════════════════════════════ */
 
     .section .text
@@ -81,6 +135,12 @@
     .option norelax
 
 _start:
+    /* ── SMP: dispatch based on hart ID ─────────────────────────────── */
+    csrr    t0, mhartid
+    bnez    t0, .secondary_init
+
+    /* ═══════════════ HART 0: PRIMARY BOOT ═══════════════════════════ */
+
     /* 1. Copy trap handler to SRAM */
     la      t0, _trap_handler       /* source (runtime address) */
     li      t1, SRAM_BASE           /* destination */
@@ -96,15 +156,27 @@ _start:
     /* Ensure I-cache sees the new code */
     fence.i
 
-    /* 2. mtvec = SRAM trap handler */
+    /* 2. Initialize shared SMP data in SRAM */
+    li      t0, SRAM_SHARED
+    li      t1, HSM_STARTED
+    sw      t1, SHARED_H0_STATE(t0)   /* hart 0 = STARTED */
+    li      t1, HSM_STOPPED
+    sw      t1, SHARED_H1_STATE(t0)   /* hart 1 = STOPPED */
+    sw      zero, SHARED_H1_ENTRY(t0)
+    sw      zero, SHARED_H1_OPAQUE(t0)
+    li      t1, 1
+    sw      t1, SHARED_INIT_DONE(t0)  /* signal to hart 1 */
+    fence                              /* ensure visible */
+
+    /* 3. mtvec = SRAM trap handler */
     li      t0, SRAM_BASE
     csrw    mtvec, t0
 
-    /* 3. mscratch = trap stack */
-    li      t0, SRAM_TRAP_STACK
+    /* 4. mscratch = hart 0 trap stack */
+    li      t0, SRAM_STACK_H0
     csrw    mscratch, t0
 
-    /* 4. PMP: SRAM M-only, everything else open */
+    /* 5. PMP: SRAM M-only, everything else open */
     li      t0, 0x040003FF
     csrw    pmpaddr0, t0
     li      t0, 0x3FFFFFFF
@@ -112,17 +184,17 @@ _start:
     li      t0, 0x1F18
     csrw    pmpcfg0, t0
 
-    /* 5. Delegate traps — keep illegal insn (bit 2) and ecall-from-S (bit 9) */
+    /* 6. Delegate traps — keep illegal insn (bit 2) and ecall-from-S (bit 9) */
     li      t0, 0xFFFFFDFB          /* all except bits 2 and 9 */
     csrw    medeleg, t0
     li      t0, 0xFFFFFFFF
     csrw    mideleg, t0
 
-    /* 6. Enable M-mode timer interrupt */
-    li      t0, MIE_MTIE
+    /* 7. Enable M-mode timer + software interrupts */
+    li      t0, (MIE_MTIE | MIE_MSIE)
     csrw    mie, t0
 
-    /* 7. mstatus.MPP = Supervisor */
+    /* 8. mstatus.MPP = Supervisor */
     csrr    t0, mstatus
     li      t1, 0x1800
     not     t1, t1
@@ -131,20 +203,27 @@ _start:
     or      t0, t0, t1
     csrw    mstatus, t0
 
-    /* ── A/B boot selection ──────────────────────────────────────────── */
+    /* ── A/B boot selection via SELSW switches ────────────────────── */
     li      s0, UART_BASE
 
-    /* Read boot flag byte from flash */
-    li      t0, BOOT_FLAGS_ADDR
-    lbu     s3, 0(t0)                /* s3 = boot flag byte */
+    /* Read switches CSR (active-low: 0 = pressed) */
+    li      t0, SWITCHES_IN
+    lw      s3, 0(t0)                /* s3 = raw switch value */
+    not     s3, s3                   /* invert: 1 = pressed */
+    andi    s3, s3, 0x3              /* mask to SELSW[1:0] */
 
-    /* Select kernel entry point */
-    li      s4, SLOT_A_ENTRY          /* s4 = kernel entry (default A) */
-    li      t0, BOOT_FLAG_B
-    bne     s3, t0, .boot_slot_a
-    li      s4, SLOT_B_ENTRY          /* flag == 'B' → slot B */
+    /* Select kernel entry point:
+     *   default (0x0): HyperRAM 0x40000000 (SD card boot)
+     *   SELSW[0] (0x1): XIP flash slot A
+     *   SELSW[1] (0x2): XIP flash slot B */
+    li      s4, RAM_ENTRY             /* s4 = kernel entry (default: HyperRAM) */
+    beqz    s3, .boot_slot_selected   /* no switch → SD/RAM boot */
+    li      s4, SLOT_A_ENTRY          /* SELSW[0] → slot A */
+    andi    t0, s3, 0x2               /* SELSW[1] pressed? */
+    beqz    t0, .boot_slot_selected
+    li      s4, SLOT_B_ENTRY          /* SELSW[1] → slot B */
 
-.boot_slot_a:
+.boot_slot_selected:
     /* ── Debug: print boot slot and flash checksums via UART ──────── */
     /* Print banner "STUB:A" or "STUB:B" */
     li      a0, 'S'
@@ -157,9 +236,13 @@ _start:
     jal     ra, .uart_putc
     li      a0, ':'
     jal     ra, .uart_putc
-    /* Print slot letter */
-    li      t0, BOOT_FLAG_B
-    bne     s3, t0, .print_a
+    /* Print slot letter: R=RAM, A=flash-A, B=flash-B */
+    bnez    s3, .print_flash_slot
+    li      a0, 'R'
+    j       .print_slot_done
+.print_flash_slot:
+    andi    t0, s3, 0x2
+    beqz    t0, .print_a
     li      a0, 'B'
     j       .print_slot_done
 .print_a:
@@ -221,15 +304,75 @@ _start:
 
     /* ── Continue boot ────────────────────────────────────────────── */
 
-    /* 8. mepc = selected kernel entry */
+    /* 9. mepc = selected kernel entry */
     csrw    mepc, s4
 
-    /* 9. a0 = hartid, a1 = DTB */
+    /* 10. a0 = hartid, a1 = DTB (0 = use built-in DTB) */
     li      a0, 0
-    li      a1, DTB_ADDR
+    li      a1, 0
 
-    /* 10. Enter S-mode */
+    /* 11. Enter S-mode */
     mret
+
+    /* ═══════════════ HART 1+: SECONDARY INIT ════════════════════════ */
+
+.secondary_init:
+    /* Wait for hart 0 to finish copying trap handler + shared data */
+    li      t1, SRAM_SHARED
+.wait_init:
+    lw      t2, SHARED_INIT_DONE(t1)
+    beqz    t2, .wait_init
+    fence                              /* acquire barrier */
+
+    /* mtvec = SRAM trap handler */
+    li      t0, SRAM_BASE
+    csrw    mtvec, t0
+
+    /* mscratch = hart 1 trap stack */
+    li      t0, SRAM_STACK_H1
+    csrw    mscratch, t0
+
+    /* PMP: same as hart 0 */
+    li      t0, 0x040003FF
+    csrw    pmpaddr0, t0
+    li      t0, 0x3FFFFFFF
+    csrw    pmpaddr1, t0
+    li      t0, 0x1F18
+    csrw    pmpcfg0, t0
+
+    /* Delegate traps — same as hart 0 */
+    li      t0, 0xFFFFFDFB
+    csrw    medeleg, t0
+    li      t0, 0xFFFFFFFF
+    csrw    mideleg, t0
+
+    /* Enable M-mode timer + software interrupts */
+    li      t0, (MIE_MTIE | MIE_MSIE)
+    csrw    mie, t0
+
+    /* mstatus: MPP = Supervisor, MIE = 1 (enable interrupts for WFI) */
+    csrr    t0, mstatus
+    li      t1, 0x1800
+    not     t1, t1
+    and     t0, t0, t1
+    li      t1, (MSTATUS_MPP_S | MSTATUS_MIE)
+    or      t0, t0, t1
+    csrw    mstatus, t0
+
+    /* Clear any pending software interrupt for this hart */
+    csrr    t0, mhartid
+    slli    t0, t0, 2
+    li      t1, CLINT_MSIP_BASE
+    add     t0, t1, t0
+    sw      zero, 0(t0)
+
+    /* Jump to parking loop in SRAM (safe from HyperRAM overwrites) */
+    la      t0, .secondary_park
+    la      t1, _trap_handler
+    sub     t0, t0, t1              /* offset within handler */
+    li      t1, SRAM_BASE
+    add     t0, t1, t0             /* SRAM address of parking loop */
+    jr      t0
 
 /* ── UART helper routines (used during init only) ─────────────────── */
 
@@ -315,6 +458,7 @@ _trap_handler:
     sw      t5, 120(sp)             /* x30 */
     sw      a0,  40(sp)             /* x10 */
     sw      a1,  44(sp)             /* x11 */
+    sw      a2,  48(sp)             /* x12 — needed by HSM */
     sw      a6,  64(sp)             /* x16 */
     sw      a7,  68(sp)             /* x17 */
 
@@ -345,12 +489,23 @@ _trap_handler:
     li      t0, SBI_EXT_BASE
     beq     a7, t0, .sbi_base
 
+    li      t0, SBI_EXT_HSM
+    beq     a7, t0, .sbi_hsm
+
+    li      t0, SBI_EXT_IPI
+    beq     a7, t0, .sbi_ipi
+
     li      a0, SBI_ERR_NOT_SUPPORTED
     li      a1, 0
     j       .trap_ret_ecall
 
+    /* ── SBI set_timer (per-hart) ────────────────────────────────── */
 .sbi_set_timer:
-    li      t0, CLINT_MTIMECMP
+    /* Compute per-hart MTIMECMP: base + mhartid * 8 */
+    csrr    t0, mhartid
+    slli    t0, t0, 3
+    li      t1, CLINT_MTIMECMP
+    add     t0, t1, t0
     sw      a0, 0(t0)
     sw      a1, 4(t0)
     li      t0, MIP_STIP
@@ -361,7 +516,11 @@ _trap_handler:
     j       .trap_ret_ecall
 
 .sbi_set_timer_v02:
-    li      t0, CLINT_MTIMECMP
+    /* Compute per-hart MTIMECMP: base + mhartid * 8 */
+    csrr    t0, mhartid
+    slli    t0, t0, 3
+    li      t1, CLINT_MTIMECMP
+    add     t0, t1, t0
     sw      a0, 0(t0)
     sw      a1, 4(t0)
     li      t0, MIP_STIP
@@ -372,6 +531,7 @@ _trap_handler:
     li      a1, 0
     j       .trap_ret_ecall
 
+    /* ── SBI BASE extension ──────────────────────────────────────── */
 .sbi_base:
     li      t0, SBI_BASE_GET_SPEC_VERSION
     beq     a6, t0, .base_spec
@@ -393,17 +553,17 @@ _trap_handler:
 
 .base_spec:
     li      a0, SBI_SUCCESS
-    li      a1, 2
+    li      a1, 2                   /* SBI spec v0.2 */
     j       .trap_ret_ecall
 
 .base_imp_id:
     li      a0, SBI_SUCCESS
-    li      a1, 0xFF
+    li      a1, 0xFF                /* custom implementation */
     j       .trap_ret_ecall
 
 .base_imp_ver:
     li      a0, SBI_SUCCESS
-    li      a1, 1
+    li      a1, 2                   /* version 2: SMP support */
     j       .trap_ret_ecall
 
 .base_probe:
@@ -413,6 +573,10 @@ _trap_handler:
     li      t0, SBI_EXT_BASE
     beq     a0, t0, .probe_yes
     li      t0, SBI_EXT_0_1_SET_TIMER
+    beq     a0, t0, .probe_yes
+    li      t0, SBI_EXT_HSM
+    beq     a0, t0, .probe_yes
+    li      t0, SBI_EXT_IPI
     beq     a0, t0, .probe_yes
     li      a0, SBI_SUCCESS
     j       .trap_ret_ecall
@@ -427,12 +591,137 @@ _trap_handler:
     li      a1, 0
     j       .trap_ret_ecall
 
-    /* ── M-mode timer interrupt ───────────────────────────────────── */
+    /* ── SBI HSM extension ───────────────────────────────────────── */
+.sbi_hsm:
+    li      t0, SBI_HSM_HART_START
+    beq     a6, t0, .hsm_hart_start
+    li      t0, SBI_HSM_HART_GET_STATUS
+    beq     a6, t0, .hsm_hart_status
+    li      t0, SBI_HSM_HART_STOP
+    beq     a6, t0, .hsm_hart_stop
+    li      a0, SBI_ERR_NOT_SUPPORTED
+    li      a1, 0
+    j       .trap_ret_ecall
+
+.hsm_hart_start:
+    /* a0 = hartid, a1 = start_addr, a2 = opaque */
+    /* Only support hartid 1 */
+    li      t0, 1
+    bne     a0, t0, .hsm_invalid_param
+
+    /* Check hart 1 is currently STOPPED */
+    li      t0, SRAM_SHARED
+    lw      t1, SHARED_H1_STATE(t0)
+    li      t2, HSM_STOPPED
+    bne     t1, t2, .hsm_already_avail
+
+    /* Store start address and opaque */
+    sw      a1, SHARED_H1_ENTRY(t0)
+    sw      a2, SHARED_H1_OPAQUE(t0)
+
+    /* Set state to START_PENDING */
+    li      t1, HSM_START_PENDING
+    sw      t1, SHARED_H1_STATE(t0)
+    fence                           /* ensure stores visible */
+
+    /* Send IPI to hart 1 */
+    li      t0, CLINT_MSIP_BASE
+    li      t1, 1
+    sw      t1, 4(t0)              /* msip[1] = 1 */
+
+    li      a0, SBI_SUCCESS
+    li      a1, 0
+    j       .trap_ret_ecall
+
+.hsm_invalid_param:
+    li      a0, SBI_ERR_INVALID_PARAM
+    li      a1, 0
+    j       .trap_ret_ecall
+
+.hsm_already_avail:
+    li      a0, SBI_ERR_ALREADY_AVAILABLE
+    li      a1, 0
+    j       .trap_ret_ecall
+
+.hsm_hart_status:
+    /* a0 = hartid */
+    li      t0, 1
+    bgt     a0, t0, .hsm_invalid_param
+    /* Load state: shared + hartid*4 */
+    li      t0, SRAM_SHARED
+    slli    t1, a0, 2
+    add     t0, t0, t1
+    lw      a1, 0(t0)
+    li      a0, SBI_SUCCESS
+    j       .trap_ret_ecall
+
+.hsm_hart_stop:
+    /* Mark calling hart as STOPPED, then spin forever in WFI */
+    csrr    t0, mhartid
+    slli    t0, t0, 2
+    li      t1, SRAM_SHARED
+    add     t0, t1, t0
+    li      t1, HSM_STOPPED
+    sw      t1, 0(t0)
+    fence
+.hart_stop_loop:
+    wfi
+    j       .hart_stop_loop
+
+    /* ── SBI IPI extension (sPI) ─────────────────────────────────── */
+.sbi_ipi:
+    /* a0 = hart_mask, a1 = hart_mask_base
+     * For our 2-hart system: check each hart in the mask
+     * and write 1 to their MSIP register to inject SSIP. */
+
+    /* Check if hart 0 is in mask: bit (0 - base) of mask */
+    bltz    a1, .ipi_check_h1       /* base < 0: hart 0 not in mask */
+    sub     t0, zero, a1            /* t0 = -base = bit position for hart 0 */
+    srl     t0, a0, t0             /* RV32 uses lower 5 bits of shift */
+    andi    t0, t0, 1
+    beqz    t0, .ipi_check_h1
+    /* Hart 0 in mask: set msip[0] */
+    li      t0, CLINT_MSIP_BASE
+    li      t1, 1
+    sw      t1, 0(t0)
+
+.ipi_check_h1:
+    /* Check if hart 1 is in mask: bit (1 - base) of mask */
+    li      t0, 1
+    sub     t0, t0, a1             /* t0 = 1 - base = bit position */
+    bltz    t0, .ipi_done           /* if negative, hart 1 not in mask */
+    li      t1, 31
+    bgt     t0, t1, .ipi_done      /* if >= 32, not in mask */
+    srl     t0, a0, t0
+    andi    t0, t0, 1
+    beqz    t0, .ipi_done
+    /* Hart 1 in mask: set msip[1] */
+    li      t0, CLINT_MSIP_BASE
+    li      t1, 1
+    sw      t1, 4(t0)
+
+.ipi_done:
+    li      a0, SBI_SUCCESS
+    li      a1, 0
+    j       .trap_ret_ecall
+
+    /* ── Interrupt dispatch ──────────────────────────────────────── */
 .handle_interrupt:
     li      t1, MCAUSE_M_TIMER_IRQ
-    bne     t0, t1, .trap_unknown
+    beq     t0, t1, .handle_timer
 
-    li      t0, CLINT_MTIMECMP
+    li      t1, MCAUSE_M_SWIRQ
+    beq     t0, t1, .handle_swirq
+
+    j       .trap_unknown
+
+    /* ── M-mode timer interrupt (per-hart) ───────────────────────── */
+.handle_timer:
+    /* Compute per-hart MTIMECMP: base + mhartid * 8 */
+    csrr    t0, mhartid
+    slli    t0, t0, 3
+    li      t1, CLINT_MTIMECMP
+    add     t0, t1, t0
     li      t1, -1
     sw      t1, 0(t0)
     sw      t1, 4(t0)
@@ -442,6 +731,21 @@ _trap_handler:
     csrs    mip, t0
     j       .trap_ret_notouch
 
+    /* ── M-mode software interrupt (IPI → inject SSIP) ───────────── */
+.handle_swirq:
+    /* Clear this hart's MSIP */
+    csrr    t0, mhartid
+    slli    t0, t0, 2
+    li      t1, CLINT_MSIP_BASE
+    add     t0, t1, t0
+    sw      zero, 0(t0)
+
+    /* Inject S-mode software interrupt (SSIP) */
+    li      t0, MIP_SSIP
+    csrs    mip, t0
+
+    j       .trap_ret_notouch
+
     /* ── Illegal instruction ──────────────────────────────────────── */
 .handle_illegal_insn:
     /* Save all remaining registers for arbitrary rd writeback */
@@ -449,7 +753,6 @@ _trap_handler:
     sw      tp,  16(sp)
     sw      s0,  32(sp)
     sw      s1,  36(sp)
-    sw      a2,  48(sp)
     sw      a3,  52(sp)
     sw      a4,  56(sp)
     sw      a5,  60(sp)
@@ -559,6 +862,7 @@ _trap_handler:
     lw      t3, 112(sp)
     lw      t4, 116(sp)
     lw      t5, 120(sp)
+    lw      a2,  48(sp)
     lw      a6,  64(sp)
     lw      a7,  68(sp)
     addi    sp, sp, FRAME_SIZE
@@ -576,6 +880,7 @@ _trap_handler:
     lw      t5, 120(sp)
     lw      a0,  40(sp)
     lw      a1,  44(sp)
+    lw      a2,  48(sp)
     lw      a6,  64(sp)
     lw      a7,  68(sp)
     addi    sp, sp, FRAME_SIZE
@@ -616,6 +921,37 @@ _trap_handler:
     lw      t6, 124(sp)
     addi    sp, sp, FRAME_SIZE
     csrrw   sp, mscratch, sp
+    mret
+
+    /* ── Secondary hart parking loop (runs in SRAM) ──────────────── */
+    .balign 4
+.secondary_park:
+    wfi
+
+    /* Check if HSM state changed to START_PENDING */
+    li      t0, SRAM_SHARED
+    lw      t1, SHARED_H1_STATE(t0)
+    li      t2, HSM_START_PENDING
+    bne     t1, t2, .secondary_park
+
+    /* We've been started — mark as STARTED */
+    li      t1, HSM_STARTED
+    sw      t1, SHARED_H1_STATE(t0)
+
+    /* Load entry point and opaque value */
+    lw      t1, SHARED_H1_ENTRY(t0)
+    lw      t2, SHARED_H1_OPAQUE(t0)
+
+    /* Clear software interrupt */
+    li      t0, CLINT_MSIP_BASE
+    sw      zero, 4(t0)            /* clear msip[1] */
+
+    /* Set up for S-mode entry */
+    csrw    mepc, t1
+
+    csrr    a0, mhartid             /* a0 = hartid */
+    mv      a1, t2                  /* a1 = opaque */
+
     mret
 
 _trap_handler_end:

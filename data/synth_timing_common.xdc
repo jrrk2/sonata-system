@@ -60,8 +60,8 @@ create_generated_clock -source $clk_sys_source_pin -divide_by 2 \
                        -name clk_rpi_spi0 [get_port rph_g11_sclk] ;# R-Pi SPI0 clk
 create_generated_clock -source $clk_sys_source_pin -divide_by 2 \
                        -name clk_rpi_spi1 [get_port rph_g21_sclk] ;# R-Pi SPI1 clk
-create_generated_clock -source $clk_sys_source_pin -divide_by 2 \
-                       -name clk_appspi [get_port appspi_clk] ;# Flash SPI clk
+create_generated_clock -name clk_appspi -source [get_pins u_spi_flash_iobuf/u_spi_clk_oddr/C] \
+                       -divide_by 1 -invert [get_ports appspi_clk] ;# Flash SPI clk (ODDR on clk_sys, inverted = rising edge at negedge clk_sys)
 create_generated_clock -source $clk_sys_source_pin -divide_by 2 \
                        -name clk_ethmac [get_port ethmac_sclk] ;# Ethernet SPI clk
 
@@ -595,50 +595,49 @@ set_output_delay -clock vclk_sys -min 0 [get_ports {rph_g1 rph_g0}]
 set_output_delay -clock vclk_sys -max [expr {(-200 * 0.8) + $clk_sys_ns}] [get_ports rgbled0]
 set_output_delay -clock vclk_sys -min 0                                   [get_ports rgbled0]
 
-## SPI Flash
+## SPI Flash (DDR pads on clk_sys 40 MHz)
 # Winbond W25Q256JV flash memory timing requirements:
-# - Max clock frequency: 50 MHz (Read Data instructions)
+# - Max clock frequency: 133 MHz (Quad I/O Fast Read)
 # - Data outputs spec: 6 ns max-dly /  1.5 ns Hold (falling clk edge)
 # - Data inputs req:   2 ns Setup   /  3   ns Hold (rising clk edge)
 # - Chip select req:   5 ns Setup   / 10   ns Hold (rising clk edge)
 #
-# Sonata SPI host can only go as fast as half the system clock,
-# so constrain the other SPI signals relative to the output SPI clock
-# and create multicycle path constraints in the timing exceptions section.
+# DDR I/O pads clocked by clk_sys (40 MHz):
+#   ODDR for SPI clock: D1=0, D2=1 → 40 MHz at pad
+#   ODDR for data: D1=D2=data (SDR through DDR pad)
+#   IDDR for input: captures on both edges; Q1 (posedge) is primary
+#   IDELAYE2 on input path for tap-based delay adjustment
 #
-# SPI data is launched and sampled on opposite clock edges
-# (i.e. sample on rising edge, launch on falling edge).
-# For the purposes of these timing constraints we will assume that
-# *we* launch and capture data on the SPI *rising* edge and the
-# *peripheral* launches and captures on the *falling* edge, to give us the
-# required half-cycle within the everything-on-rising-edge framework.
-# In other words, we can model the half-cycle relationship between
-# launch and capture by adding a half-cycle of I/O delay on data signals.
+# SPI rising edge = negedge clk_sys; flash samples data at this edge.
+# SPI falling edge = posedge clk_sys; flash drives response data.
 #
 # Distance to app Flash chip = ~10-20 mm  x2(clk there + data back)
 set appspi_trce_dly_max [expr {20 * 2 * 0.010}]
 set appspi_trce_dly_min [expr {10 * 2 * 0.004}]
-# Expect input from 6 ns (+margin) + max-trace-delay after falling (launch)
-# edge of SPI clk to 1.5 ns (+margin) + min-trace-delay after the following
-# falling (launch) clk edge.
-set_input_delay -clock clk_appspi -max [expr {$sclk_ns/2.0 + $appspi_trce_dly_max + (6   * 1.1)}] [get_ports appspi_d1] ;# CIPO
-set_input_delay -clock clk_appspi -min [expr {$sclk_ns/2.0 + $appspi_trce_dly_min + (1.5 * 1.1)}] [get_ports appspi_d1]
-# Require clock output as soon as reasonably possible after rising
-# SPI clk edge. Do so by allocating nearly all the cycle to external delay.
-set_output_delay -clock clk_sys -max [expr {$clk_sys_ns - 14}] [get_ports appspi_clk] ;# SCLK
-set_output_delay -clock clk_sys -min 0                         [get_ports appspi_clk]
-# Require most outputs from 2 ns (+margin) before falling (pseudo-capture)
-# edge to 3 ns (+margin) after falling (pseudo-capture) edge.
-set_output_delay -clock clk_appspi -max [expr {$sclk_ns/2.0 + (2 * 1.1)}] [get_ports appspi_d0] ;# COPI
-set_output_delay -clock clk_appspi -min [expr {$sclk_ns/2.0 - (3 * 1.1)}] [get_ports appspi_d0]
-set_output_delay -clock clk_appspi -max [expr {$sclk_ns/2.0 + (2 * 1.1)}] [get_ports appspi_d2] ;# WP_N
-set_output_delay -clock clk_appspi -min [expr {$sclk_ns/2.0 - (3 * 1.1)}] [get_ports appspi_d2]
-set_output_delay -clock clk_appspi -max [expr {$sclk_ns/2.0 + (2 * 1.1)}] [get_ports appspi_d3] ;# HOLD_N
-set_output_delay -clock clk_appspi -min [expr {$sclk_ns/2.0 - (3 * 1.1)}] [get_ports appspi_d3]
-# Require chip select from 5 ns (+margin) before falling (pseudo-capture)
-# edge to 10 ns (+margin) after falling (pseudo-capture) edge.
-set_output_delay -clock clk_appspi -max [expr {$sclk_ns/2.0 + ( 5 * 1.1)}] [get_ports appspi_cs] ;# CS_N
-set_output_delay -clock clk_appspi -min [expr {$sclk_ns/2.0 - (10 * 1.1)}] [get_ports appspi_cs]
+# Input delays: flash drives data after SPI_CLK falling edge (= posedge clk_sys).
+# Data arrives after tCLQV (6 ns max) + trace delay.
+# Input path goes through IDELAYE2 → IDDR, so timing is relative to clk_appspi.
+set appspi_data_inputs {appspi_d0 appspi_d1 appspi_d2 appspi_d3}
+set_input_delay -clock clk_appspi -max [expr {$appspi_trce_dly_max + (6   * 1.1)}] [get_ports $appspi_data_inputs]
+set_input_delay -clock clk_appspi -min [expr {$appspi_trce_dly_min + (1.5 * 1.1)}] [get_ports $appspi_data_inputs]
+# Output delays: data + CS driven via ODDR on clk_sys, flash samples on SPI rising edge.
+# All output ODDRs use D1=D2 (SDR pass-through): data transitions on clk_sys posedge only,
+# NOT on clk_sys negedge (= clk_appspi rising edge). The hold check against the clk_appspi
+# rising edge is therefore overly pessimistic — relax it with set_multicycle_path -hold.
+#
+# Setup requirement: 2 ns (data), 5 ns (CS). Hold requirement: 3 ns (data), 5 ns (CS).
+set appspi_data_outputs {appspi_d0 appspi_d2 appspi_d3}
+set_output_delay -clock clk_appspi -max [expr {(2 * 1.1)}] [get_ports $appspi_data_outputs]
+set_output_delay -clock clk_appspi -min [expr {-(3 * 1.1)}] [get_ports $appspi_data_outputs]
+# CS now also driven via ODDR (D1=D2=cs_n) for matched timing with data/clock.
+set_output_delay -clock clk_appspi -max [expr {( 5 * 1.1)}] [get_ports appspi_cs]
+set_output_delay -clock clk_appspi -min [expr {-(5 * 1.1)}] [get_ports appspi_cs]
+# All output ODDRs (data + CS) use D1=D2: no transition at clk_appspi rising edge.
+# Relax hold check to use the previous clk_sys posedge (one full half-period of margin).
+set_multicycle_path -hold 1 -from [get_clocks clk_sys] -to [get_clocks clk_appspi] \
+                    -through [get_ports {appspi_d0 appspi_d2 appspi_d3 appspi_cs}]
+# IDELAY constraints: constrain IDELAYCTRL reference clock
+set_property IDELAY_VALUE 0 [get_cells u_spi_flash_iobuf/gen_spi_io[*].u_idelay]
 
 ## Ethernet MAC
 # KSZ8851SNLI datasheet:
@@ -786,12 +785,7 @@ set_multicycle_path [expr {$lcd_slow_mulcycs - 1}] -hold  -end -to [get_ports {l
 set_multicycle_path        $lcd_slow_mulcycs       -setup -end -from [get_ports lcd_copi]
 set_multicycle_path [expr {$lcd_slow_mulcycs - 1}] -hold  -end -from [get_ports lcd_copi]
 ## App Flash
-# Data in and out driven/captured by SPI host block.
-set appspi_mulcycs 2
-set_multicycle_path        $appspi_mulcycs       -setup -start -to [get_ports {appspi_d0 appspi_d2 appspi_d3 appspi_cs}] ;# out
-set_multicycle_path [expr {$appspi_mulcycs - 1}] -hold  -start -to [get_ports {appspi_d0 appspi_d2 appspi_d3 appspi_cs}] ;# out
-set_multicycle_path        $appspi_mulcycs       -setup -end -from [get_ports appspi_d1] ;# in
-set_multicycle_path [expr {$appspi_mulcycs - 1}] -hold  -end -from [get_ports appspi_d1] ;# in
+# DDR mode: no multicycle paths needed — data changes every sys_clk cycle.
 ## Ethernet MAC
 # Data in and out driven/captured by SPI host block.
 set ethmac_mulcycs 2

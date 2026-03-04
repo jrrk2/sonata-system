@@ -10,19 +10,32 @@
 //   tl_reg_i / tl_reg_o — Register interface for runtime config + raw SPI
 //
 // Register map (base typically 0x80130000, 256 bytes):
-//   0x00 CTRL     RW  [7:0] SPI clock divider, [8] XIP enable (default 1)
-//   0x04 STATUS   RO  [0] busy, [1] XIP idle
-//   0x08 CMD      WO  Write triggers raw SPI transaction
-//                     [7:0] command byte, [8] quad data phase,
-//                     [15:12] dummy cycles, [19:16] addr bytes (0-4),
-//                     [9] data length bit 8 (MSB)
-//                     [31:24] data length bits [7:0] (total 9-bit, 0-256)
-//   0x0C ADDR     RW  Flash address for raw SPI commands
-//   0x10 WDATA    WO  TX FIFO push (uses byte enables)
-//   0x14 RDATA    RO  RX FIFO pop
-//   0x18 FIFO_STS RO  [7:0] TX FIFO level, [15:8] RX FIFO level
+//   0x00 CTRL      RW  [7:0] SPI clock divider, [8] XIP enable (default 1),
+//                      [9] DDR enable (default 1),
+//                      [12:10] read delay (0-7, half-cycle steps, default 4)
+//                        [10] Q1/Q2 edge select (0=posedge, 1=negedge)
+//                        [12:11] rise_tick delay (0-3 clk_sys cycles)
+//   0x04 STATUS    RO  [0] busy, [1] XIP idle
+//   0x08 CMD       WO  Write triggers raw SPI transaction
+//                      [7:0] command byte, [8] quad data phase,
+//                      [15:12] dummy cycles, [19:16] addr bytes (0-4),
+//                      [9] data length bit 8 (MSB)
+//                      [31:24] data length bits [7:0] (total 9-bit, 0-256)
+//   0x0C ADDR      RW  Flash address for raw SPI commands
+//   0x10 WDATA     WO  TX FIFO push (uses byte enables)
+//   0x14 RDATA     RO  RX FIFO pop
+//   0x18 FIFO_STS  RO  [7:0] TX FIFO level, [15:8] RX FIFO level
+//   0x1C CAP_CTRL  RW  [0] arm, [1] force_trigger, [7:4] trig_sel;
+//                  RO  [8] done, [9] idelay_rdy
+//   0x20 CAP_ADDR  RW  [10:0] read word address (2 samples/word)
+//   0x24 CAP_DATA  RO  2 packed 9-bit samples: [8:0]=even, [17:9]=odd
+//   0x28 CAP_LEN   RW  [11:0] capture length (max 4096)
+//   0x2C IDELAY_TAP RW [4:0] d0, [12:8] d1, [20:16] d2, [28:24] d3; write triggers LD
 //
-// SPI clock = sys_clk / (2 * (clk_div + 1)).
+// SPI clock: div=0 uses ODDR(clk_sys, D1=0, D2=1) for clk_sys-rate SPI clock.
+//            div>=1 uses prescaler: clk_sys / (2*(div+1)).
+//            DDR enable is independent of divider — controls IDDR pipeline handling.
+// All I/O uses DDR pads clocked by clk_sys (40 MHz). No separate SPI clock domain.
 
 `include "prim_assert.sv"
 
@@ -32,11 +45,11 @@ module spi_flash_xip
 #(
   parameter int unsigned AddrWidth     = 25,  // 32 MB = 2^25
   parameter int unsigned DataWidth     = 32,
-  parameter int unsigned SpiClkDiv     = 0,   // Default: sys_clk / 2 (reset value for CTRL reg)
+  parameter int unsigned SpiClkDiv     = 0,   // Default: DDR mode (reset value for CTRL reg)
   parameter int unsigned LineSizeBytes = 32,  // Prefetch line (power of 2, >= 4)
   parameter int unsigned RegAw         = 8    // Register address width (256 bytes)
 ) (
-  input  logic clk_i,
+  input  logic clk_i,      // System clock (40 MHz) — FSM, registers, TileLink, DDR I/O
   input  logic rst_ni,
 
   // TileLink-UL subordinate: XIP memory-mapped reads
@@ -47,12 +60,34 @@ module spi_flash_xip
   input  tl_h2d_t tl_reg_i,
   output tl_d2h_t tl_reg_o,
 
-  // QSPI flash pins
-  output logic       spi_clk_o,
+  // QSPI flash DDR pad interface
+  // Clock ODDR (D1 on posedge, D2 on negedge of clk_sys)
+  output logic       spi_clk_d1_o,
+  output logic       spi_clk_d2_o,
+  // Chip select
   output logic       spi_cs_n_o,
-  output logic [3:0] spi_d_o,
-  input  logic [3:0] spi_d_i,
-  output logic [3:0] spi_d_oe_o  // 1 = output, 0 = input
+  // Data ODDR outputs (D1 = posedge data, D2 = negedge data)
+  output logic [3:0] spi_d_d1_o,
+  output logic [3:0] spi_d_d2_o,
+  // Data IDDR inputs (Q1 = posedge capture, Q2 = negedge capture)
+  input  logic [3:0] spi_d_q1_i,
+  input  logic [3:0] spi_d_q2_i,
+  // Output enable (active high = output)
+  output logic [3:0] spi_d_oe_o,
+
+  // Capture BRAM control (directly wired to spi_flash_iobuf)
+  output logic        cap_arm_o,
+  output logic        cap_force_trig_o,
+  output logic [3:0]  cap_trig_sel_o,
+  input  logic        cap_done_i,
+  input  logic        cap_idelay_rdy_i,
+  output logic [10:0] cap_rd_addr_o,
+  input  logic [31:0] cap_rd_data_i,
+  output logic [11:0] cap_length_o,
+
+  // IDELAY tap control
+  output logic [31:0] idelay_tap_o,
+  output logic        idelay_tap_wr_o
 );
 
   // ---------------------------------------------------------------------------
@@ -78,13 +113,18 @@ module spi_flash_xip
   localparam int unsigned DATA_CLKS = LineSizeBytes * 2;  // 2 clocks per byte (quad)
 
   // Register offsets
-  localparam logic [RegAw-1:0] REG_CTRL     = 8'h00;
-  localparam logic [RegAw-1:0] REG_STATUS   = 8'h04;
-  localparam logic [RegAw-1:0] REG_CMD      = 8'h08;
-  localparam logic [RegAw-1:0] REG_ADDR     = 8'h0C;
-  localparam logic [RegAw-1:0] REG_WDATA    = 8'h10;
-  localparam logic [RegAw-1:0] REG_RDATA    = 8'h14;
-  localparam logic [RegAw-1:0] REG_FIFO_STS = 8'h18;
+  localparam logic [RegAw-1:0] REG_CTRL      = 8'h00;
+  localparam logic [RegAw-1:0] REG_STATUS    = 8'h04;
+  localparam logic [RegAw-1:0] REG_CMD       = 8'h08;
+  localparam logic [RegAw-1:0] REG_ADDR      = 8'h0C;
+  localparam logic [RegAw-1:0] REG_WDATA     = 8'h10;
+  localparam logic [RegAw-1:0] REG_RDATA     = 8'h14;
+  localparam logic [RegAw-1:0] REG_FIFO_STS  = 8'h18;
+  localparam logic [RegAw-1:0] REG_CAP_CTRL  = 8'h1C;
+  localparam logic [RegAw-1:0] REG_CAP_ADDR  = 8'h20;
+  localparam logic [RegAw-1:0] REG_CAP_DATA  = 8'h24;
+  localparam logic [RegAw-1:0] REG_CAP_LEN   = 8'h28;
+  localparam logic [RegAw-1:0] REG_IDELAY_TAP = 8'h2C;
 
   // ---------------------------------------------------------------------------
   // TileLink adapter → SRAM-like interface (XIP read path)
@@ -183,9 +223,29 @@ module spi_flash_xip
   // ---------------------------------------------------------------------------
   logic [7:0]  clk_div_reg;     // CTRL[7:0]
   logic        xip_en_reg;      // CTRL[8]
+  logic        ddr_en_reg;      // CTRL[9]
+  logic [2:0]  read_delay_reg;  // CTRL[12:10] — read delay, half-cycle resolution
   logic [31:0] raw_cmd_reg;     // CMD register (latched on write)
   logic [31:0] raw_addr_reg;    // ADDR register
   logic        cmd_trigger;     // Pulse when CMD is written
+
+  // Capture/IDELAY registers
+  logic        cap_arm_reg;
+  logic        cap_force_trig_reg;
+  logic [3:0]  cap_trig_sel_reg;
+  logic [10:0] cap_rd_addr_reg;
+  logic [11:0] cap_length_reg;
+  logic [31:0] idelay_tap_reg;
+  logic        idelay_tap_wr_pulse;
+
+  // Wire capture control to iobuf
+  assign cap_arm_o         = cap_arm_reg;
+  assign cap_force_trig_o  = cap_force_trig_reg;
+  assign cap_trig_sel_o    = cap_trig_sel_reg;
+  assign cap_rd_addr_o     = cap_rd_addr_reg;
+  assign cap_length_o      = cap_length_reg;
+  assign idelay_tap_o      = idelay_tap_reg;
+  assign idelay_tap_wr_o   = idelay_tap_wr_pulse;
 
   // Decode CMD fields
   logic [7:0]  cmd_opcode;
@@ -239,34 +299,113 @@ module spi_flash_xip
   logic                 line_valid;
 
   // ---------------------------------------------------------------------------
-  // SPI clock generation — runtime divider
+  // SPI clock generation — clk_sys DDR prescaler
   // ---------------------------------------------------------------------------
-  logic [ClkCntW-1:0] clk_cnt;
-  logic                spi_clk_q;
-  logic                spi_clk_rise;
-  logic                spi_clk_fall;
-  logic                spi_active;
+  // div=0 ("div_zero"): ODDR(clk_sys, D1=0, D2=1) → 40 MHz SPI clock at pad.
+  //   FSM advances every clk_sys cycle; one SPI clock per clk_sys cycle.
+  //
+  // div>=1: prescaler in clk_sys domain.
+  //   ODDR D1=D2=pre_spi_clk (SDR pass-through via DDR pad).
+  //   SPI freq = clk_sys / (2*div).
+  //   div=1 → 20 MHz, div=2 → 10 MHz, div=3 → 6.67 MHz, div=4 → 5 MHz, etc.
+  //
+  // ddr_en (CTRL[9]) is reserved for future DTR flash protocol support.
+  //
+  // No separate SPI clock domain needed — all DDR pads clocked by clk_sys.
+
+  logic spi_clk_rise;
+  logic spi_clk_fall;
+  logic spi_active;
+  logic div_zero;
+
+  assign div_zero = (clk_div_reg == 8'h0);
+
+  // --- clk_sys domain prescaler (div>=1) ---
+  logic [ClkCntW-1:0] pre_cnt;
+  logic                pre_spi_clk;
+  logic                pre_rise_tick;
+  logic                pre_fall_tick;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      clk_cnt   <= '0;
-      spi_clk_q <= 1'b0;
-    end else if (spi_active) begin
-      if (clk_cnt == clk_div_reg) begin
-        clk_cnt   <= '0;
-        spi_clk_q <= ~spi_clk_q;
-      end else begin
-        clk_cnt <= clk_cnt + 8'd1;
-      end
+      pre_cnt       <= 8'd1;
+      pre_spi_clk   <= 1'b0;
+      pre_rise_tick <= 1'b0;
+      pre_fall_tick <= 1'b0;
+    end else if (!spi_active || div_zero) begin
+      pre_cnt       <= 8'd1;
+      pre_spi_clk   <= 1'b0;
+      pre_rise_tick <= 1'b0;
+      pre_fall_tick <= 1'b0;
     end else begin
-      clk_cnt   <= '0;
-      spi_clk_q <= 1'b0;
+      pre_rise_tick <= 1'b0;
+      pre_fall_tick <= 1'b0;
+      if (pre_cnt == clk_div_reg) begin
+        pre_cnt     <= 8'd1;
+        pre_spi_clk <= ~pre_spi_clk;
+        if (!pre_spi_clk) pre_rise_tick <= 1'b1;
+        else               pre_fall_tick <= 1'b1;
+      end else begin
+        pre_cnt <= pre_cnt + 8'd1;
+      end
     end
   end
 
-  assign spi_clk_rise = spi_active && (clk_cnt == clk_div_reg) && !spi_clk_q;
-  assign spi_clk_fall = spi_active && (clk_cnt == clk_div_reg) &&  spi_clk_q;
-  assign spi_clk_o    = spi_clk_q;
+  // --- Configurable read delay with half-cycle resolution (CTRL[12:10]) ---
+  // The IDDR SAME_EDGE_PIPELINED pipeline, ODDR output register, and flash
+  // tCLQV all add latency between the prescaler rise_tick and valid data.
+  // read_delay_reg provides half-cycle granularity:
+  //   [0]   = edge select: 0 → IDDR Q1 (posedge), 1 → IDDR Q2 (negedge)
+  //   [2:1] = rise_tick delay: 0-3 clk_sys cycles
+  //
+  //   delay=0: Q1 + 0 cycles  (0.0 cycle offset)
+  //   delay=1: Q2 + 0 cycles  (0.5 cycle offset)
+  //   delay=2: Q1 + 1 cycle   (1.0 cycle offset)
+  //   delay=3: Q2 + 1 cycle   (1.5 cycle offset)
+  //   delay=4: Q1 + 2 cycles  (2.0 cycle offset)
+  //   delay=5: Q2 + 2 cycles  (2.5 cycle offset)
+  //   delay=6: Q1 + 3 cycles  (3.0 cycle offset)
+  //   delay=7: Q2 + 3 cycles  (3.5 cycle offset)
+  //
+  // At div=0, rise_tick fires every clk_sys cycle, so delay=4 (2 cycles)
+  // compensates the 2-cycle IDDR SAME_EDGE_PIPELINED latency.
+
+  // Rise tick delay: 0-3 clk_sys cycles via 3-stage shift register
+  logic [2:0] rise_tick_sr;
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni)
+      rise_tick_sr <= 3'b0;
+    else
+      rise_tick_sr <= {rise_tick_sr[1:0], pre_rise_tick};
+  end
+
+  logic pre_rise_tick_delayed;
+  always_comb begin
+    case (read_delay_reg[2:1])
+      2'd0: pre_rise_tick_delayed = pre_rise_tick;
+      2'd1: pre_rise_tick_delayed = rise_tick_sr[0];
+      2'd2: pre_rise_tick_delayed = rise_tick_sr[1];
+      2'd3: pre_rise_tick_delayed = rise_tick_sr[2];
+    endcase
+  end
+
+  // Data input mux: Q1 (posedge capture) or Q2 (negedge capture)
+  logic [3:0] spi_d_i;
+  assign spi_d_i = read_delay_reg[0] ? spi_d_q2_i : spi_d_q1_i;
+
+  // --- Mux: div_zero vs prescaler ---
+  // div_zero: FSM advances every clk_sys cycle
+  // Prescaler mode: FSM advances on delayed prescaler edge ticks (rise) /
+  //                 undelayed ticks (fall, for transmit phases)
+  assign spi_clk_rise = div_zero ? spi_active : pre_rise_tick_delayed;
+  assign spi_clk_fall = div_zero ? spi_active : pre_fall_tick;
+
+  // ODDR clock outputs:
+  // div_zero: D1=0 (posedge=low), D2=spi_active (negedge=high when active)
+  //   → 40 MHz square wave at pad when active
+  // Prescaler mode: D1=D2=pre_spi_clk & spi_active (SDR pass-through via DDR pad)
+  assign spi_clk_d1_o = div_zero ? 1'b0      : (pre_spi_clk & spi_active);
+  assign spi_clk_d2_o = div_zero ? spi_active : (pre_spi_clk & spi_active);
 
   // ---------------------------------------------------------------------------
   // State machine
@@ -337,20 +476,36 @@ module spi_flash_xip
   logic spi_busy;
   assign spi_busy = (state_q != ST_IDLE);
 
+  // IDDR pipeline skip: IDDR SAME_EDGE_PIPELINED has 2-cycle perceived
+  // latency (data at pad → visible to fabric). When the SPI period is short
+  // enough that this latency wraps around, the first sample(s) are stale.
+  // - div=0 DDR: period=1 cycle, latency=2 → skip 2
+  // - div=1:     period=2 cycles, latency=2 → skip 1
+  // - div>=2:    period>=4 cycles, latency=2 → no skip needed (read_delay handles it)
+
+  // Q2 is now used via spi_d_i mux (read_delay_reg[0] selects Q1 vs Q2)
+
   // ---------------------------------------------------------------------------
   // Register read mux
   // ---------------------------------------------------------------------------
   always_comb begin
     reg_rdata = 32'h0;
     case (reg_addr)
-      REG_CTRL:     reg_rdata = {23'h0, xip_en_reg, clk_div_reg};
-      REG_STATUS:   reg_rdata = {30'h0, (state_q == ST_IDLE), spi_busy};
-      REG_CMD:      reg_rdata = raw_cmd_reg;
-      REG_ADDR:     reg_rdata = raw_addr_reg;
-      REG_WDATA:    reg_rdata = 32'h0;  // Write-only
-      REG_RDATA:    reg_rdata = {24'h0, (rx_level != 0) ? rx_rd_data : 8'h0};
-      REG_FIFO_STS: reg_rdata = {14'h0, rx_level, tx_level};
-      default:      reg_rdata = 32'h0;
+      REG_CTRL:      reg_rdata = {19'h0, read_delay_reg, ddr_en_reg, xip_en_reg, clk_div_reg};
+      REG_STATUS:    reg_rdata = {30'h0, (state_q == ST_IDLE), spi_busy};
+      REG_CMD:       reg_rdata = raw_cmd_reg;
+      REG_ADDR:      reg_rdata = raw_addr_reg;
+      REG_WDATA:     reg_rdata = 32'h0;  // Write-only
+      REG_RDATA:     reg_rdata = {24'h0, (rx_level != 0) ? rx_rd_data : 8'h0};
+      REG_FIFO_STS:  reg_rdata = {14'h0, rx_level, tx_level};
+      REG_CAP_CTRL:  reg_rdata = {22'h0, cap_idelay_rdy_i, cap_done_i,
+                                  cap_trig_sel_reg, 2'b0,
+                                  cap_force_trig_reg, cap_arm_reg};
+      REG_CAP_ADDR:  reg_rdata = {21'h0, cap_rd_addr_reg};
+      REG_CAP_DATA:  reg_rdata = cap_rd_data_i;
+      REG_CAP_LEN:   reg_rdata = {20'h0, cap_length_reg};
+      REG_IDELAY_TAP: reg_rdata = idelay_tap_reg;
+      default:       reg_rdata = 32'h0;
     endcase
   end
 
@@ -359,19 +514,32 @@ module spi_flash_xip
   // ---------------------------------------------------------------------------
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      clk_div_reg    <= ClkCntW'(SpiClkDiv);
-      xip_en_reg     <= 1'b1;
-      raw_cmd_reg    <= 32'h0;
-      raw_addr_reg   <= 32'h0;
-      cmd_trigger    <= 1'b0;
-      tx_wr_ptr      <= 9'h0;
-      rx_rd_ptr      <= 9'h0;
-      wdata_push     <= 1'b0;
-      wdata_byte_idx <= 2'd0;
-      wdata_stage    <= 32'h0;
-      wdata_be_stage <= 4'h0;
+      clk_div_reg       <= ClkCntW'(SpiClkDiv);
+      xip_en_reg        <= 1'b1;
+      ddr_en_reg        <= 1'b1;
+      read_delay_reg    <= 3'd4;  // Default: Q1 + 2 cycles (2.0 cycle offset)
+      raw_cmd_reg       <= 32'h0;
+      raw_addr_reg      <= 32'h0;
+      cmd_trigger       <= 1'b0;
+      tx_wr_ptr         <= 9'h0;
+      rx_rd_ptr         <= 9'h0;
+      wdata_push        <= 1'b0;
+      wdata_byte_idx    <= 2'd0;
+      wdata_stage       <= 32'h0;
+      wdata_be_stage    <= 4'h0;
+      cap_arm_reg       <= 1'b0;
+      cap_force_trig_reg <= 1'b0;
+      cap_trig_sel_reg  <= 4'h0;
+      cap_rd_addr_reg   <= 11'h0;
+      cap_length_reg    <= 12'd4094;  // Default: ~4096 samples
+      idelay_tap_reg    <= 32'h0;
+      idelay_tap_wr_pulse <= 1'b0;
     end else begin
       cmd_trigger <= 1'b0;
+      idelay_tap_wr_pulse <= 1'b0;
+      // Clear arm after one cycle (self-clearing)
+      cap_arm_reg <= 1'b0;
+      cap_force_trig_reg <= 1'b0;
 
       // WDATA push FSM: serialize word writes into single-byte FIFO pushes
       if (wdata_push) begin
@@ -390,7 +558,11 @@ module spi_flash_xip
         case (reg_addr)
           REG_CTRL: begin
             if (reg_be[0]) clk_div_reg <= reg_wdata[7:0];
-            if (reg_be[1]) xip_en_reg  <= reg_wdata[8];
+            if (reg_be[1]) begin
+              xip_en_reg     <= reg_wdata[8];
+              ddr_en_reg     <= reg_wdata[9];
+              read_delay_reg <= reg_wdata[12:10];
+            end
           end
           REG_CMD: begin
             raw_cmd_reg <= reg_wdata;
@@ -405,6 +577,25 @@ module spi_flash_xip
             wdata_be_stage <= reg_be;
             wdata_push     <= 1'b1;
             wdata_byte_idx <= 2'd0;
+          end
+          REG_CAP_CTRL: begin
+            if (reg_be[0]) begin
+              cap_arm_reg        <= reg_wdata[0];
+              cap_force_trig_reg <= reg_wdata[1];
+              cap_trig_sel_reg   <= reg_wdata[7:4];
+            end
+          end
+          REG_CAP_ADDR: begin
+            if (reg_be[0]) cap_rd_addr_reg[7:0]  <= reg_wdata[7:0];
+            if (reg_be[1]) cap_rd_addr_reg[10:8] <= reg_wdata[10:8];
+          end
+          REG_CAP_LEN: begin
+            if (reg_be[0]) cap_length_reg[7:0]  <= reg_wdata[7:0];
+            if (reg_be[1]) cap_length_reg[11:8] <= reg_wdata[11:8];
+          end
+          REG_IDELAY_TAP: begin
+            idelay_tap_reg      <= reg_wdata;
+            idelay_tap_wr_pulse <= 1'b1;
           end
           default: ;
         endcase
@@ -526,7 +717,7 @@ module spi_flash_xip
         end
 
         // =============================================================
-        // XIP read sequence (unchanged from original)
+        // XIP read sequence
         // =============================================================
 
         ST_CS_ASSERT: begin
@@ -565,10 +756,10 @@ module spi_flash_xip
           if (spi_clk_fall) begin
             shift_q <= {shift_q[27:0], 4'b0};
             if (phase_cnt == 5) begin
-              phase_cnt   <= '0;
-              rx_byte_idx <= '0;
-              rx_hi       <= 1'b0;
-              state_q     <= ST_READ;
+              phase_cnt      <= '0;
+              rx_byte_idx    <= '0;
+              rx_hi          <= 1'b0;
+              state_q        <= ST_READ;
             end else begin
               phase_cnt <= phase_cnt + 11'd1;
             end
@@ -641,8 +832,8 @@ module spi_flash_xip
                   tx_rd_ptr <= tx_rd_ptr + 9'd1;
                   state_q <= ST_RAW_DATA_WR;
                 end else begin
-                  raw_rx_hi <= 1'b0;
-                  state_q   <= ST_RAW_DATA_RD;
+                  raw_rx_hi     <= 1'b0;
+                  state_q       <= ST_RAW_DATA_RD;
                 end
               end else begin
                 state_q <= ST_RAW_CS_HI;
@@ -673,8 +864,8 @@ module spi_flash_xip
                     tx_rd_ptr <= tx_rd_ptr + 9'd1;
                     state_q <= ST_RAW_DATA_WR;
                   end else begin
-                    raw_rx_hi <= 1'b0;
-                    state_q   <= ST_RAW_DATA_RD;
+                    raw_rx_hi     <= 1'b0;
+                    state_q       <= ST_RAW_DATA_RD;
                   end
                 end else begin
                   state_q <= ST_RAW_CS_HI;
@@ -698,8 +889,8 @@ module spi_flash_xip
                   tx_rd_ptr <= tx_rd_ptr + 9'd1;
                   state_q <= ST_RAW_DATA_WR;
                 end else begin
-                  raw_rx_hi <= 1'b0;
-                  state_q   <= ST_RAW_DATA_RD;
+                  raw_rx_hi     <= 1'b0;
+                  state_q       <= ST_RAW_DATA_RD;
                 end
               end else begin
                 state_q <= ST_RAW_CS_HI;
@@ -832,79 +1023,87 @@ module spi_flash_xip
   end
 
   // ---------------------------------------------------------------------------
-  // Data output & direction
+  // Data output & direction (D1=D2 for SDR flash through DDR pads)
   // ---------------------------------------------------------------------------
+  logic [3:0] spi_d_out;
+  logic [3:0] spi_d_oe_int;
+
   always_comb begin
-    spi_d_o    = 4'b0000;
-    spi_d_oe_o = 4'b0000;
+    spi_d_out    = 4'b0000;
+    spi_d_oe_int = 4'b0000;
 
     case (state_q)
       // Single SPI: command on d0 only
       ST_RST_CS1_LO,
       ST_RST_CS2_LO,
       ST_CMD: begin
-        spi_d_o    = {3'b000, shift_q[31]};
-        spi_d_oe_o = 4'b0001;
+        spi_d_out    = {3'b000, shift_q[31]};
+        spi_d_oe_int = 4'b0001;
       end
 
       // Quad output: address nibbles (XIP)
       ST_ADDR: begin
-        spi_d_o    = shift_q[31:28];
-        spi_d_oe_o = 4'b1111;
+        spi_d_out    = shift_q[31:28];
+        spi_d_oe_int = 4'b1111;
       end
 
       // Dummy: first 2 clocks = mode bits (output), last 4 = Hi-Z (XIP)
       ST_DUMMY: begin
         if (phase_cnt < 2) begin
-          spi_d_o    = shift_q[31:28];
-          spi_d_oe_o = 4'b1111;
+          spi_d_out    = shift_q[31:28];
+          spi_d_oe_int = 4'b1111;
         end
       end
 
       // XIP Read: all inputs
       ST_READ: begin
-        spi_d_o    = 4'b0000;
-        spi_d_oe_o = 4'b0000;
+        spi_d_out    = 4'b0000;
+        spi_d_oe_int = 4'b0000;
       end
 
       // Raw SPI: command byte on d0 (single)
       ST_RAW_CMD: begin
-        spi_d_o    = {3'b000, shift_q[31]};
-        spi_d_oe_o = 4'b0001;
+        spi_d_out    = {3'b000, shift_q[31]};
+        spi_d_oe_int = 4'b0001;
       end
 
       // Raw SPI: address on d0 (single)
       ST_RAW_ADDR: begin
-        spi_d_o    = {3'b000, shift_q[31]};
-        spi_d_oe_o = 4'b0001;
+        spi_d_out    = {3'b000, shift_q[31]};
+        spi_d_oe_int = 4'b0001;
       end
 
       // Raw SPI: dummy cycles (Hi-Z)
       ST_RAW_DUMMY: begin
-        spi_d_o    = 4'b0000;
-        spi_d_oe_o = 4'b0000;
+        spi_d_out    = 4'b0000;
+        spi_d_oe_int = 4'b0000;
       end
 
       // Raw SPI: write data
       ST_RAW_DATA_WR: begin
         if (cmd_quad_data) begin
-          spi_d_o    = shift_q[31:28];
-          spi_d_oe_o = 4'b1111;
+          spi_d_out    = shift_q[31:28];
+          spi_d_oe_int = 4'b1111;
         end else begin
-          spi_d_o    = {3'b000, shift_q[31]};
-          spi_d_oe_o = 4'b0001;
+          spi_d_out    = {3'b000, shift_q[31]};
+          spi_d_oe_int = 4'b0001;
         end
       end
 
       // Raw SPI: read data (all inputs)
       ST_RAW_DATA_RD: begin
-        spi_d_o    = 4'b0000;
-        spi_d_oe_o = 4'b0000;
+        spi_d_out    = 4'b0000;
+        spi_d_oe_int = 4'b0000;
       end
 
       default: ;
     endcase
   end
+
+  // DDR data: D1=D2=same data (SDR flash through DDR pads)
+  assign spi_d_d1_o = spi_d_out;
+  assign spi_d_d2_o = spi_d_out;
+  assign spi_d_oe_o = spi_d_oe_int;
 
   // ---------------------------------------------------------------------------
   // Assertions

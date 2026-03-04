@@ -9,6 +9,6 @@ ENTRY(_start)
 SECTIONS
 {
     . = 0;
-    .text : { *(.text) }
+    .text : { *(.text) *(.got) *(.got.plt) }
     /DISCARD/ : { *(*) }
 }

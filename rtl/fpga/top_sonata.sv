@@ -217,7 +217,7 @@ module top_sonata
   import sonata_pkg::*;
 
   // System clock frequency.
-  parameter int unsigned SysClkFreq      =  40_000_000;
+  parameter int unsigned SysClkFreq      =  30_000_000;
   parameter int unsigned HyperRAMClkFreq = 100_000_000;
 
   parameter SRAMInitFile    = "";
@@ -306,20 +306,71 @@ module top_sonata
   assign microsd_dat3    = microsd_dat_oe ? microsd_dat_out[3] : 1'bz;
   assign microsd_dat_in[3] = microsd_dat3;
 
-  // QSPI flash XIP interface signals
-  logic       spi_flash_clk;
+  // QSPI flash DDR pad interface signals
+  logic       spi_flash_clk_d1;
+  logic       spi_flash_clk_d2;
   logic       spi_flash_cs_n;
-  logic [3:0] spi_flash_d_o;
-  logic [3:0] spi_flash_d_i;
+  logic [3:0] spi_flash_d_d1;
+  logic [3:0] spi_flash_d_d2;
+  logic [3:0] spi_flash_d_q1;
+  logic [3:0] spi_flash_d_q2;
   logic [3:0] spi_flash_d_oe;
 
-  assign appspi_clk = spi_flash_clk;
-  assign appspi_cs  = spi_flash_cs_n;
-  assign appspi_d0  = spi_flash_d_oe[0] ? spi_flash_d_o[0] : 1'bz;
-  assign appspi_d1  = spi_flash_d_oe[1] ? spi_flash_d_o[1] : 1'bz;
-  assign appspi_d2  = spi_flash_d_oe[2] ? spi_flash_d_o[2] : 1'bz;
-  assign appspi_d3  = spi_flash_d_oe[3] ? spi_flash_d_o[3] : 1'bz;
-  assign spi_flash_d_i = {appspi_d3, appspi_d2, appspi_d1, appspi_d0};
+  // Capture BRAM control signals
+  logic        spi_cap_arm;
+  logic        spi_cap_force_trig;
+  logic [3:0]  spi_cap_trig_sel;
+  logic        spi_cap_done;
+  logic        spi_cap_idelay_rdy;
+  logic [10:0] spi_cap_rd_addr;
+  logic [31:0] spi_cap_rd_data;
+  logic [11:0] spi_cap_length;
+  logic [31:0] spi_idelay_tap;
+  logic        spi_idelay_tap_wr;
+
+  // SPI Flash I/O buffer — DDR pads, IDELAY, capture BRAM
+  spi_flash_iobuf #(
+    .SimMode (1'b0)
+  ) u_spi_flash_iobuf (
+    .clk_sys_i        (clk_sys),
+    .rst_sys_ni       (rst_sys_n),
+
+    // Pad-facing
+    .appspi_clk_o     (appspi_clk),
+    .appspi_cs_o      (appspi_cs),
+    .appspi_d0_io     (appspi_d0),
+    .appspi_d1_io     (appspi_d1),
+    .appspi_d2_io     (appspi_d2),
+    .appspi_d3_io     (appspi_d3),
+
+    // Sim ports unused in FPGA
+    .sim_d_i          (4'b0),
+    .sim_d_o          (),
+
+    // Core-facing
+    .spi_clk_d1_i     (spi_flash_clk_d1),
+    .spi_clk_d2_i     (spi_flash_clk_d2),
+    .spi_cs_n_i       (spi_flash_cs_n),
+    .spi_d_d1_i       (spi_flash_d_d1),
+    .spi_d_d2_i       (spi_flash_d_d2),
+    .spi_d_q1_o       (spi_flash_d_q1),
+    .spi_d_q2_o       (spi_flash_d_q2),
+    .spi_d_oe_i       (spi_flash_d_oe),
+
+    // Capture BRAM
+    .cap_arm_i        (spi_cap_arm),
+    .cap_force_trig_i (spi_cap_force_trig),
+    .cap_trig_sel_i   (spi_cap_trig_sel),
+    .cap_done_o       (spi_cap_done),
+    .cap_idelay_rdy_o (spi_cap_idelay_rdy),
+    .cap_rd_addr_i    (spi_cap_rd_addr),
+    .cap_rd_data_o    (spi_cap_rd_data),
+    .cap_length_i     (spi_cap_length),
+
+    // IDELAY tap control
+    .idelay_tap_i     (spi_idelay_tap),
+    .idelay_tap_wr_i  (spi_idelay_tap_wr)
+  );
 
   sonata_system #(
     .CheriErrWidth   ( 9               ),
@@ -437,12 +488,25 @@ module top_sonata
     .microsd_dat_oe_o  (microsd_dat_oe),
     .microsd_detect_i  (microsd_det),
 
-    // QSPI flash XIP
-    .spi_flash_clk_o   (spi_flash_clk),
-    .spi_flash_cs_n_o  (spi_flash_cs_n),
-    .spi_flash_d_o     (spi_flash_d_o),
-    .spi_flash_d_i     (spi_flash_d_i),
-    .spi_flash_d_oe_o  (spi_flash_d_oe),
+    // QSPI flash XIP DDR pad interface
+    .spi_flash_clk_d1_o     (spi_flash_clk_d1),
+    .spi_flash_clk_d2_o     (spi_flash_clk_d2),
+    .spi_flash_cs_n_o       (spi_flash_cs_n),
+    .spi_flash_d_d1_o       (spi_flash_d_d1),
+    .spi_flash_d_d2_o       (spi_flash_d_d2),
+    .spi_flash_d_q1_i       (spi_flash_d_q1),
+    .spi_flash_d_q2_i       (spi_flash_d_q2),
+    .spi_flash_d_oe_o       (spi_flash_d_oe),
+    .spi_cap_arm_o           (spi_cap_arm),
+    .spi_cap_force_trig_o    (spi_cap_force_trig),
+    .spi_cap_trig_sel_o      (spi_cap_trig_sel),
+    .spi_cap_done_i          (spi_cap_done),
+    .spi_cap_idelay_rdy_i    (spi_cap_idelay_rdy),
+    .spi_cap_rd_addr_o       (spi_cap_rd_addr),
+    .spi_cap_rd_data_i       (spi_cap_rd_data),
+    .spi_cap_length_o        (spi_cap_length),
+    .spi_idelay_tap_o        (spi_idelay_tap),
+    .spi_idelay_tap_wr_o     (spi_idelay_tap_wr),
 
     .in_from_pins_i     (in_from_pins    ),
     .out_to_pins_o      (out_to_pins     ),
@@ -468,7 +532,8 @@ module top_sonata
   // under software control so some boards are not supported.
   assign mb0 = 1'b1;
 
-  // Produce 50 MHz system clock from 25 MHz Sonata board clock.
+  // Produce system clock from 25 MHz Sonata board clock.
+  // Static PLL: no DRP. SPI flash uses DDR pads on clk_sys — no separate SPI clock.
   clkgen_sonata #(
     .SysClkFreq      ( SysClkFreq      ),
     .HyperRAMClkFreq ( HyperRAMClkFreq )
@@ -511,7 +576,7 @@ module top_sonata
   assign in_from_pins[IN_PIN_RS485_RX    ] = rs485_rx;
   assign in_from_pins[IN_PIN_SER1_RX     ] = ser1_rx;
   assign in_from_pins[IN_PIN_SER0_RX     ] = ser0_rx;
-  assign in_from_pins[IN_PIN_APPSPI_D1   ] = appspi_d1; // Still connected for pinmux visibility
+  assign in_from_pins[IN_PIN_APPSPI_D1   ] = spi_flash_d_q1[1]; // IDDR Q1 output (was pad wire — invalid IOBUF load)
   assign in_from_pins[IN_PIN_MICROSD_DAT0] = 1'b1; // MicroSD now driven by native SD controller
 
   assign mb10         = out_to_pins[OUT_PIN_MB10        ];
