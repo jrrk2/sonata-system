@@ -414,8 +414,8 @@ always @(posedge clk_25mhz or negedge rstn) begin
             end
         end
 
-        // Clear sync at end of frame
-        if (~byte_sync) begin
+        // Clear sync at end of frame (but not if a new frame is starting)
+        if (~byte_sync && ~rx_axis_tvalid) begin
             if (sync) begin
                 rx_buf_next <= rx_buf_next + 1;
                 $display("[%0t] RX: Clear sync at end of frame, rx_addr_axis=%0d", $time, rx_addr_axis);

@@ -1,0 +1,149 @@
+// Verilated -*- C++ -*-
+// DESCRIPTION: Verilator output: Symbol table internal header
+//
+// Internal details; most calling programs do not need this header,
+// unless using verilator public meta comments.
+
+#ifndef VERILATED_VSONATA__SYMS_H_
+#define VERILATED_VSONATA__SYMS_H_  // guard
+
+#include "verilated.h"
+
+// INCLUDE MODEL CLASS
+
+#include "Vsonata.h"
+
+// INCLUDE MODULE CLASSES
+#include "Vsonata___024root.h"
+#include "Vsonata_sonata.h"
+#include "Vsonata_VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT.h"
+#include "Vsonata_VexRiscv.h"
+
+// DPI TYPES for DPI Export callbacks (Internal use)
+
+// SYMS CLASS (contains all model state)
+class alignas(VL_CACHE_LINE_BYTES)Vsonata__Syms final : public VerilatedSyms {
+  public:
+    // INTERNAL STATE
+    Vsonata* const __Vm_modelp;
+    VlDeleter __Vm_deleter;
+    bool __Vm_didInit = false;
+
+    // MODULE INSTANCE STATE
+    Vsonata___024root              TOP;
+    Vsonata_sonata                 TOP__sonata;
+    Vsonata_VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT TOP__sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT;
+    Vsonata_VexRiscv               TOP__sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu;
+
+    // SCOPE NAMES
+    VerilatedScope __Vscope_TOP;
+    VerilatedScope __Vscope_sonata;
+    VerilatedScope __Vscope_sonata__BUFG;
+    VerilatedScope __Vscope_sonata__BUFG_1;
+    VerilatedScope __Vscope_sonata__BUFG_2;
+    VerilatedScope __Vscope_sonata__FDCE;
+    VerilatedScope __Vscope_sonata__FDCE_1;
+    VerilatedScope __Vscope_sonata__FDCE_2;
+    VerilatedScope __Vscope_sonata__FDCE_3;
+    VerilatedScope __Vscope_sonata__FDCE_4;
+    VerilatedScope __Vscope_sonata__FDCE_5;
+    VerilatedScope __Vscope_sonata__FDCE_6;
+    VerilatedScope __Vscope_sonata__FDCE_7;
+    VerilatedScope __Vscope_sonata__FDPE;
+    VerilatedScope __Vscope_sonata__FDPE_1;
+    VerilatedScope __Vscope_sonata__FDPE_2;
+    VerilatedScope __Vscope_sonata__FDPE_3;
+    VerilatedScope __Vscope_sonata__IDDR;
+    VerilatedScope __Vscope_sonata__IDDR_1;
+    VerilatedScope __Vscope_sonata__IDDR_2;
+    VerilatedScope __Vscope_sonata__IDDR_3;
+    VerilatedScope __Vscope_sonata__IDDR_4;
+    VerilatedScope __Vscope_sonata__IDDR_5;
+    VerilatedScope __Vscope_sonata__IDDR_6;
+    VerilatedScope __Vscope_sonata__IDDR_7;
+    VerilatedScope __Vscope_sonata__IDDR_8;
+    VerilatedScope __Vscope_sonata__IOBUF;
+    VerilatedScope __Vscope_sonata__IOBUF_1;
+    VerilatedScope __Vscope_sonata__IOBUF_2;
+    VerilatedScope __Vscope_sonata__IOBUF_3;
+    VerilatedScope __Vscope_sonata__IOBUF_4;
+    VerilatedScope __Vscope_sonata__IOBUF_5;
+    VerilatedScope __Vscope_sonata__IOBUF_6;
+    VerilatedScope __Vscope_sonata__IOBUF_7;
+    VerilatedScope __Vscope_sonata__IOBUF_8;
+    VerilatedScope __Vscope_sonata__ODDR;
+    VerilatedScope __Vscope_sonata__ODDR_1;
+    VerilatedScope __Vscope_sonata__ODDR_10;
+    VerilatedScope __Vscope_sonata__ODDR_11;
+    VerilatedScope __Vscope_sonata__ODDR_12;
+    VerilatedScope __Vscope_sonata__ODDR_13;
+    VerilatedScope __Vscope_sonata__ODDR_14;
+    VerilatedScope __Vscope_sonata__ODDR_15;
+    VerilatedScope __Vscope_sonata__ODDR_16;
+    VerilatedScope __Vscope_sonata__ODDR_17;
+    VerilatedScope __Vscope_sonata__ODDR_18;
+    VerilatedScope __Vscope_sonata__ODDR_19;
+    VerilatedScope __Vscope_sonata__ODDR_2;
+    VerilatedScope __Vscope_sonata__ODDR_20;
+    VerilatedScope __Vscope_sonata__ODDR_3;
+    VerilatedScope __Vscope_sonata__ODDR_4;
+    VerilatedScope __Vscope_sonata__ODDR_5;
+    VerilatedScope __Vscope_sonata__ODDR_6;
+    VerilatedScope __Vscope_sonata__ODDR_7;
+    VerilatedScope __Vscope_sonata__ODDR_8;
+    VerilatedScope __Vscope_sonata__ODDR_9;
+    VerilatedScope __Vscope_sonata__PLLE2_ADV;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__bufferCC_7;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__bufferCC_8;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__bufferCC_9;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__clintWishboneBridge_logic_bridge;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__clint_logic;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__IBusCachedPlugin_cache;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_0_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_10_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_11_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_12_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_13_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_14_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_15_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_1_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_2_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_3_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_4_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_5_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_6_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_7_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_8_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__dataCache_1__ways_9_data;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__cores_0_cpu_logic_cpu__systemCd_logic_outputReset_buffercc;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__iArbiter_bmb_decoder;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__peripheralBridge_bmb_arbiter;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__peripheralBridge_bmb_arbiter__memory_arbiter;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__peripheralBridge_logic;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__plicWishboneBridge_logic_bridge;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_dm;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_withTap_tunnel;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_withTap_tunnel__tunnel;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_withTap_tunnel__tunnel__logic_jtagLogic_dmiCmd_ccToggle;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_withTap_tunnel__tunnel__logic_jtagLogic_dmiCmd_ccToggle__inputArea_target_buffercc;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_withTap_tunnel__tunnel__logic_systemLogic_bus_rsp_ccToggle;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_withTap_tunnel__tunnel__logic_systemLogic_bus_rsp_ccToggle__bufferCC_7;
+    VerilatedScope __Vscope_sonata__VexRiscvLitexSmpCluster_Cc1_Iw32Is65536Iy16_Dw32Ds65536Dy16_ITs4DTs4_Ood_Wm_Wf32_Pd_Hb1_JtagT__privilegedDebug_logic_withTap_tunnel__tunnel__logic_systemLogic_bus_rsp_ccToggle__inputArea_target_buffercc;
+    VerilatedScope __Vscope_sonata__mem_write_block;
+    VerilatedScope __Vscope_sonata__spi_wb;
+    VerilatedScope __Vscope_sonata__spi_wb__u_rx_ram;
+    VerilatedScope __Vscope_sonata__spi_wb__u_spi_core;
+    VerilatedScope __Vscope_sonata__spi_wb__u_tx_ram;
+
+    // CONSTRUCTORS
+    Vsonata__Syms(VerilatedContext* contextp, const char* namep, Vsonata* modelp);
+    ~Vsonata__Syms();
+
+    // METHODS
+    const char* name() { return TOP.name(); }
+};
+
+#endif  // guard

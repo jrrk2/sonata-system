@@ -3,6 +3,30 @@
 This documents the complete build process for the XIP Linux system on
 the Sonata FPGA board with VexRiscv soft CPU.
 
+## Quick Build (Makefile)
+
+After first-time setup, all binaries can be built with:
+
+```bash
+cd linux/
+make            # builds flashxip.bin + SD card boot files in out/
+make sdcard     # copies boot files to /tmp/sonata-sdcard/
+```
+
+See `make help` for all targets.
+
+## Boot Flow
+
+```
+BIOS → boot.json → xipjump.bin (sets a1=DTB, jumps to flash)
+    → OpenSBI @ 0x02780000 (XIP from flash, .data/.bss in HyperRAM)
+    → Kernel @ 0x02000000 (XIP from flash, uses built-in DTB)
+    → rootfs.romfs @ flash offset 0x800000
+```
+
+The kernel uses CONFIG_BUILTIN_DTB=y (required for SMP to work on hardware).
+The DTB passed via OpenSBI a1 is used by OpenSBI itself but ignored by the kernel.
+
 ## Architecture Overview
 
 ```

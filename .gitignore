@@ -32,3 +32,6 @@ compile_commands.json
 *.jou
 *.bit
 *.uf2
+
+# Linux XIP build outputs
+linux/out/

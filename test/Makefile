@@ -65,7 +65,71 @@ run-icache: xip_icache_stub.elf xip_icache_test.vmem
 	$(SIM) -E xip_icache_stub.elf +flash_kernel=xip_icache_test.vmem \
 		+UARTDPI_LOG_uart0=- +disable_cheri
 
+# ---- Standalone Ethernet test for LiteX VexRiscv (HyperRAM boot) ----
+
+VEXRISCV_CC     = riscv32-buildroot-linux-musl-gcc
+VEXRISCV_OBJCOPY = riscv32-buildroot-linux-musl-objcopy
+VEXRISCV_SIZE   = riscv32-buildroot-linux-musl-size
+VEXRISCV_CFLAGS = -march=rv32ima -mabi=ilp32 -O2 -ffreestanding -nostdlib -nostdinc \
+                  -Wall -fno-builtin -fno-common -ffunction-sections -fdata-sections \
+                  -fno-pic -fno-pie -fno-stack-protector -g \
+                  -isystem $(shell $(VEXRISCV_CC) -march=rv32ima -mabi=ilp32 -print-file-name=include)
+VEXRISCV_LDFLAGS = -T spi_eth_test.ld -nostartfiles -nodefaultlibs -static \
+                   -Wl,--gc-sections -march=rv32ima -mabi=ilp32
+
+eth_minimal_litex.elf: vexriscv_crt0.o eth_minimal_litex.o spi_eth_test.ld
+	$(VEXRISCV_CC) $(VEXRISCV_LDFLAGS) -o $@ vexriscv_crt0.o eth_minimal_litex.o
+	$(VEXRISCV_SIZE) $@
+
+eth_minimal_litex.bin: eth_minimal_litex.elf
+	$(VEXRISCV_OBJCOPY) -O binary $< $@
+	@ls -la $@
+
+eth_minimal_litex.o: eth_minimal_litex.c
+	$(VEXRISCV_CC) $(VEXRISCV_CFLAGS) -c $< -o $@
+
+vexriscv_crt0.o: vexriscv_crt0.S
+	$(VEXRISCV_CC) -march=rv32ima_zicsr -mabi=ilp32 -c $< -o $@
+
+# ---- SPI Ethernet (spi_wb + KSZ8851) Focused Testbench ----
+
+SPI_ETH_DIR     = $(CURDIR)
+SONATA_DIR      = /home/jonathan/sonata-system
+LITEX_BOARDS    = /home/jonathan/sonata-linux/litex-boards/litex_boards/platforms/verilog
+
+SPI_ETH_VERILOG = \
+  $(SPI_ETH_DIR)/spi_eth_tb_top.sv \
+  $(SONATA_DIR)/rtl/ip/spi/rtl/spi_core.sv \
+  $(SONATA_DIR)/rtl/ip/spi/rtl/spi_buf_ram.sv \
+  $(LITEX_BOARDS)/spi_wb.sv \
+  $(SONATA_DIR)/dv/models/ethernet/ksz8851snl_mac_model.v \
+  $(SONATA_DIR)/dv/models/ethernet/axis_gmii_rx.v \
+  $(SONATA_DIR)/dv/models/ethernet/axis_gmii_tx.v \
+  $(SONATA_DIR)/dv/models/ethernet/eth_lfsr.v
+
+spi_eth_sim: spi_eth_tb_top.sv spi_eth_tb.cpp
+	verilator --cc --exe --trace \
+	  -I$(SONATA_DIR)/dv/models/ethernet \
+	  -I$(SONATA_DIR)/rtl/ip/spi/rtl \
+	  -I$(LITEX_BOARDS) \
+	  -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+	  -Wno-TIMESCALEMOD -Wno-INITIALDLY -Wno-BLKSEQ \
+	  -Wno-MULTIDRIVEN -Wno-UNOPTFLAT -Wno-LATCH \
+	  -Wno-SELRANGE -Wno-WIDTHCONCAT -Wno-UNUSEDSIGNAL \
+	  -Wno-CMPCONST -Wno-UNSIGNED -Wno-ENUMVALUE \
+	  --top-module spi_eth_tb_top \
+	  $(SPI_ETH_VERILOG) \
+	  $(SPI_ETH_DIR)/spi_eth_tb.cpp \
+	  -CFLAGS "-std=c++17" \
+	  -o spi_eth_sim
+	$(MAKE) -C obj_dir -f Vspi_eth_tb_top.mk
+
+run-spi-eth: spi_eth_sim
+	@echo "Running SPI Ethernet testbench..."
+	./obj_dir/spi_eth_sim
+
 clean:
 	rm -f *.o *.elf *.bin *.vmem *.dis uart_sim.log sim_stdout.log
+	rm -rf obj_dir spi_eth_tb.vcd
 
-.PHONY: all run run-icache clean
+.PHONY: all run run-icache spi_eth_sim run-spi-eth clean
