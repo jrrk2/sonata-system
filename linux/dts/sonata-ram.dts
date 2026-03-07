@@ -9,7 +9,7 @@
 
 
         chosen {
-            bootargs = "console=liteuart earlycon=liteuart,0xf0001000 root=/dev/mtdblock2 rootfstype=romfs ro init=/sbin/init panic=5 loglevel=8";
+            bootargs = "console=liteuart earlycon=liteuart,0xf0001000 root=mtd:rootfs rootfstype=romfs ro init=/sbin/init panic=5 loglevel=8";
         };
 
         sys_clk: clock-50000000 {
@@ -108,18 +108,8 @@
 
         memory: memory@40000000 {
             device_type = "memory";
-            reg = <0x40000000 0x7F8000>;
-            /* Top 32KB excluded for OpenSBI XIP RW region at 0x407F8000.
-             * Actual usage: 24KB (.data+.bss+heap+stack+scratch).
-             * PMP protects 0x407F8000-0x407FFFFF (32KB). */
-        };
-
-        vreg_mmc: vreg_mmc {
-            compatible = "regulator-fixed";
-            regulator-name = "vreg_mmc";
-            regulator-min-microvolt = <3300000>;
-            regulator-max-microvolt = <3300000>;
-            regulator-always-on;
+            reg = <0x40000000 0x800000>;
+            /* Full 8MB HyperRAM. M-mode stub runs from SRAM, not RAM. */
         };
 
         soc {
@@ -164,42 +154,6 @@
                 status = "okay";
             };
 
-            flash@2000000 {
-                compatible = "mtd-rom";
-                reg = <0x02000000 0x2000000>;
-                bank-width = <1>;
-                #address-cells = <1>;
-                #size-cells = <1>;
-
-                kernel_a@0 {
-                    label = "kernel_a";
-                    reg = <0x000000 0x400000>;
-                };
-                kernel_b@400000 {
-                    label = "kernel_b";
-                    reg = <0x400000 0x400000>;
-                };
-                rootfs@800000 {
-                    label = "rootfs";
-                    reg = <0x800000 0x1800000>;
-                };
-            };
-
-            mmc0: mmc@f0003000 {
-                compatible = "litex,mmc";
-                reg = <0xf0003000 0x1c>,
-                      <0xf000301c 0x2c>,
-                      <0xf0003048 0x1c>,
-                      <0xf0003064 0x1c>,
-                      <0xf0003080 0x100>;
-                reg-names = "phy", "core", "reader", "writer", "irq";
-                clocks = <&sys_clk>;
-                vmmc-supply = <&vreg_mmc>;
-                bus-width = <0x04>;
-                interrupts = <3>;
-                status = "okay";
-            };
-
             spi_eth: spi@80302000 {
                 compatible = "lowrisc,opentitan-spi";
                 reg = <0x80302000 0x2000>;
@@ -236,6 +190,27 @@
                 interrupts = <4>;
                 litex,ngpio = <4>;
                 status = "okay";
+            };
+
+            flash@2000000 {
+                compatible = "mtd-rom";
+                reg = <0x02000000 0x2000000>;
+                bank-width = <1>;
+                #address-cells = <1>;
+                #size-cells = <1>;
+
+                kernel@0 {
+                    label = "kernel";
+                    reg = <0x000000 0x540000>;
+                };
+                opensbi@540000 {
+                    label = "opensbi";
+                    reg = <0x540000 0x80000>;
+                };
+                rootfs@5C0000 {
+                    label = "rootfs";
+                    reg = <0x5C0000 0x1A40000>;
+                };
             };
 
         };

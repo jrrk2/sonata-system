@@ -142,9 +142,15 @@ _start:
     /* ═══════════════ HART 0: PRIMARY BOOT ═══════════════════════════ */
 
     /* 1. Copy trap handler to SRAM */
-    la      t0, _trap_handler       /* source (runtime address) */
+    /* source = _trap_handler (PC-relative, no GOT) */
+.La_th:
+    auipc   t0, %pcrel_hi(_trap_handler)
+    addi    t0, t0, %pcrel_lo(.La_th)
     li      t1, SRAM_BASE           /* destination */
-    la      t2, _trap_handler_end   /* source end */
+    /* source end = _trap_handler_end (PC-relative) */
+.La_the:
+    auipc   t2, %pcrel_hi(_trap_handler_end)
+    addi    t2, t2, %pcrel_lo(.La_the)
 
 .copy_loop:
     lw      t3, 0(t0)
@@ -203,8 +209,48 @@ _start:
     or      t0, t0, t1
     csrw    mstatus, t0
 
-    /* ── A/B boot selection via SELSW switches ────────────────────── */
     li      s0, UART_BASE
+
+#ifdef TFTP_BOOT
+    /* ── TFTP boot: kernel is right after the 4KB stub ──────────── */
+    /* Compute kernel entry = our load address + 0x1000 (PC-relative) */
+1:  auipc   s4, %pcrel_hi(_start)
+    addi    s4, s4, %pcrel_lo(1b)
+    li      t0, 0x1000
+    add     s4, s4, t0                    /* s4 = kernel at stub + 4KB */
+
+    /* Print "TFTP\n" */
+    li      a0, 'T'
+    jal     ra, .uart_putc
+    li      a0, 'F'
+    jal     ra, .uart_putc
+    li      a0, 'T'
+    jal     ra, .uart_putc
+    li      a0, 'P'
+    jal     ra, .uart_putc
+    li      a0, '\n'
+    jal     ra, .uart_putc
+
+    /* Print first 16 bytes of kernel as hex */
+    li      a0, 'K'
+    jal     ra, .uart_putc
+    li      a0, ':'
+    jal     ra, .uart_putc
+    mv      s1, s4
+    li      s2, 16
+.print_kern_bytes:
+    lbu     a0, 0(s1)
+    jal     ra, .uart_puthex8
+    li      a0, ' '
+    jal     ra, .uart_putc
+    addi    s1, s1, 1
+    addi    s2, s2, -1
+    bnez    s2, .print_kern_bytes
+    li      a0, '\n'
+    jal     ra, .uart_putc
+
+#else
+    /* ── A/B boot selection via SELSW switches ────────────────────── */
 
     /* Read switches CSR (active-low: 0 = pressed) */
     li      t0, SWITCHES_IN
@@ -302,17 +348,40 @@ _start:
     li      a0, '\n'
     jal     ra, .uart_putc
 
+#endif /* TFTP_BOOT */
+
     /* ── Continue boot ────────────────────────────────────────────── */
 
-    /* 9. mepc = selected kernel entry */
-    csrw    mepc, s4
+    /* 9. Copy kernel to PHYS_RAM_BASE via SRAM copier */
+    /* t2 = src, t3 = dst, t4 = dst_end */
+    mv      t2, s4                        /* src = kernel at load + 4KB */
+    li      t3, 0x40000000                /* dst = PHYS_RAM_BASE */
+    lw      t4, 16(s4)                    /* image_size from Image header */
+    /* Cap copy size at available RAM (src to end of 8MB HyperRAM) */
+    li      t5, 0x40800000
+    sub     t5, t5, s4                    /* max = RAM_END - src */
+    blt     t4, t5, 1f
+    mv      t4, t5                        /* clamp to max */
+1:  add     t4, t3, t4                    /* dst_end = dst + size */
 
-    /* 10. a0 = hartid, a1 = DTB (0 = use built-in DTB) */
+    /* mepc = PHYS_RAM_BASE (kernel entry after copy) */
+    csrw    mepc, t3
+
+    /* a0 = hartid, a1 = DTB (0 = use built-in DTB) */
     li      a0, 0
     li      a1, 0
 
-    /* 11. Enter S-mode */
-    mret
+    /* Jump to copier in SRAM */
+.La_sc:
+    auipc   t0, %pcrel_hi(.sram_copier)
+    addi    t0, t0, %pcrel_lo(.La_sc)
+.La_th2:
+    auipc   t1, %pcrel_hi(_trap_handler)
+    addi    t1, t1, %pcrel_lo(.La_th2)
+    sub     t0, t0, t1                    /* offset within trap handler */
+    li      t1, SRAM_BASE
+    add     t0, t1, t0                    /* SRAM address of copier */
+    jr      t0
 
     /* ═══════════════ HART 1+: SECONDARY INIT ════════════════════════ */
 
@@ -367,8 +436,12 @@ _start:
     sw      zero, 0(t0)
 
     /* Jump to parking loop in SRAM (safe from HyperRAM overwrites) */
-    la      t0, .secondary_park
-    la      t1, _trap_handler
+.La_sp:
+    auipc   t0, %pcrel_hi(.secondary_park)
+    addi    t0, t0, %pcrel_lo(.La_sp)
+.La_th3:
+    auipc   t1, %pcrel_hi(_trap_handler)
+    addi    t1, t1, %pcrel_lo(.La_th3)
     sub     t0, t0, t1              /* offset within handler */
     li      t1, SRAM_BASE
     add     t0, t1, t0             /* SRAM address of parking loop */
@@ -952,6 +1025,23 @@ _trap_handler:
     csrr    a0, mhartid             /* a0 = hartid */
     mv      a1, t2                  /* a1 = opaque */
 
+    mret
+
+    /* ── Kernel copier (runs in SRAM, safe from overwrites) ────────── */
+    /*
+     * Copies kernel from src to dst, then mrets to dst.
+     * Entry: t2=src, t3=dst, t4=dst_end
+     *        mepc=dst (set by caller), a0=0, a1=0 (set by caller)
+     */
+    .balign 4
+.sram_copier:
+    lw      t5, 0(t2)
+    sw      t5, 0(t3)
+    addi    t2, t2, 4
+    addi    t3, t3, 4
+    blt     t3, t4, .sram_copier
+    fence.i
+    fence
     mret
 
 _trap_handler_end:

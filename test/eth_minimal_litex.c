@@ -1,4 +1,4 @@
-// Minimal KSZ8851 Ethernet - DHCP + ARP + Ping
+// Minimal KSZ8851 Ethernet - DHCP + ARP + Ping + TFTP boot
 // Ported from Ibex/Sonata streaming SPI to LiteX VexRiscv spi_wb buffer-based SPI
 // No lwIP, no interrupts, no timers - pure polling
 
@@ -116,6 +116,17 @@ static void delay_ms(uint32_t ms) { delay(ms * 12500); }  // ~50MHz/4 per loop i
 
 #define TXQCR_ENQUEUE (1 << 0)
 
+// ---- TFTP boot config ----
+
+#define IP(a,b,c,d) (((a)<<24)|((b)<<16)|((c)<<8)|(d))
+
+#define TFTP_SERVER_IP   IP(192,168,1,106)  // Compile-time server address
+#define TFTP_FILENAME    "kernel.bin"       // File to request
+#define TFTP_LOAD_ADDR   0x40200000        // HyperRAM, well past this program's 64KB
+#define TFTP_CLIENT_PORT 49152             // Our ephemeral source port
+#define TFTP_BLOCK_SIZE  1024              // Negotiated via blksize option
+// Jumps to TFTP_LOAD_ADDR after transfer — image contents are opaque
+
 // ---- Network config ----
 
 static const uint8_t MY_MAC[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 };
@@ -133,6 +144,25 @@ static uint32_t gateway_ip    = 0;
 static uint8_t  dhcp_state = DHCP_STATE_INIT;
 static uint32_t dhcp_xid   = 0xDEADBEEF;
 static uint32_t dhcp_delay = 0;
+
+// ---- ARP cache for TFTP server ----
+
+static uint8_t server_mac[6];
+static bool server_mac_valid = false;
+
+// ---- TFTP state ----
+
+#define TFTP_IDLE       0
+#define TFTP_ARP_WAIT   1
+#define TFTP_ACTIVE     2
+#define TFTP_DONE       3
+
+static uint8_t  tftp_state = TFTP_IDLE;
+static uint16_t tftp_server_port = 0;     // Server's TID (ephemeral port from first DATA)
+static uint16_t tftp_expected_block = 1;
+static uint32_t tftp_offset = 0;          // Write cursor into TFTP_LOAD_ADDR
+static uint32_t tftp_retry_timer = 0;
+static uint32_t tftp_retries = 0;
 
 // Cached RXQCR base value (matching Linux driver's rc_rxqcr)
 static uint16_t rc_rxqcr = RXQCR_RXFCTE;
@@ -562,6 +592,126 @@ static void send_arp_reply(const uint8_t *target_mac, const uint8_t *target_ip_b
   puts("  TX ARP reply\n");
 }
 
+// ---- Send ARP request ----
+
+static void send_arp_request(uint32_t target_ip) {
+  uint8_t pkt[42];
+  uint8_t *p = pkt;
+
+  memset(p, 0xFF, 6); p += 6;             // Dst: broadcast
+  memcpy(p, MY_MAC, 6); p += 6;           // Src: our MAC
+  *p++ = 0x08; *p++ = 0x06;               // ARP
+
+  *p++ = 0x00; *p++ = 0x01;               // hw type: Ethernet
+  *p++ = 0x08; *p++ = 0x00;               // proto: IPv4
+  *p++ = 6;                                // hw size
+  *p++ = 4;                                // proto size
+  *p++ = 0x00; *p++ = 0x01;               // op: Request
+
+  memcpy(p, MY_MAC, 6); p += 6;           // sender MAC
+  *p++ = (my_ip >> 24) & 0xFF;
+  *p++ = (my_ip >> 16) & 0xFF;
+  *p++ = (my_ip >> 8) & 0xFF;
+  *p++ = my_ip & 0xFF;
+
+  memset(p, 0x00, 6); p += 6;             // target MAC: unknown
+  *p++ = (target_ip >> 24) & 0xFF;
+  *p++ = (target_ip >> 16) & 0xFF;
+  *p++ = (target_ip >> 8) & 0xFF;
+  *p++ = target_ip & 0xFF;
+
+  ksz_tx(pkt, 42);
+  puts("TX ARP request for ");
+  print_ip(target_ip);
+  putchar('\n');
+}
+
+// ---- Generic UDP TX ----
+
+static void send_udp(const uint8_t *dst_mac, uint32_t dst_ip,
+                     uint16_t src_port, uint16_t dst_port,
+                     const uint8_t *data, uint16_t data_len) {
+  uint16_t udp_len = 8 + data_len;
+  uint16_t ip_len  = 20 + udp_len;
+  uint16_t eth_total = 14 + ip_len;
+
+  uint8_t pkt[1514];
+  if (eth_total > sizeof(pkt)) return;
+  uint8_t *p = pkt;
+
+  // Ethernet header
+  memcpy(p, dst_mac, 6); p += 6;
+  memcpy(p, MY_MAC, 6); p += 6;
+  *p++ = 0x08; *p++ = 0x00;
+
+  // IP header
+  uint8_t *ip_hdr = p;
+  *p++ = 0x45; *p++ = 0x00;
+  *p++ = ip_len >> 8; *p++ = ip_len & 0xFF;
+  *p++ = 0; *p++ = 0;         // ID
+  *p++ = 0; *p++ = 0;         // Flags
+  *p++ = 64;                   // TTL
+  *p++ = 17;                   // UDP
+  *p++ = 0; *p++ = 0;         // Checksum (fill later)
+  *p++ = (my_ip >> 24) & 0xFF;
+  *p++ = (my_ip >> 16) & 0xFF;
+  *p++ = (my_ip >> 8) & 0xFF;
+  *p++ = my_ip & 0xFF;
+  *p++ = (dst_ip >> 24) & 0xFF;
+  *p++ = (dst_ip >> 16) & 0xFF;
+  *p++ = (dst_ip >> 8) & 0xFF;
+  *p++ = dst_ip & 0xFF;
+
+  uint16_t csum = ip_checksum(ip_hdr, 20);
+  ip_hdr[10] = csum >> 8;
+  ip_hdr[11] = csum & 0xFF;
+
+  // UDP header
+  *p++ = src_port >> 8; *p++ = src_port & 0xFF;
+  *p++ = dst_port >> 8; *p++ = dst_port & 0xFF;
+  *p++ = udp_len >> 8;  *p++ = udp_len & 0xFF;
+  *p++ = 0; *p++ = 0;         // Checksum: 0 (optional for UDP/IPv4)
+
+  // Payload
+  memcpy(p, data, data_len);
+
+  ksz_tx(pkt, eth_total);
+}
+
+// ---- TFTP RRQ ----
+
+static void send_tftp_rrq(void) {
+  // RRQ: opcode(2) + filename + \0 + "octet" + \0 + "blksize" + \0 + "1024" + \0
+  uint8_t rrq[80];
+  uint8_t *p = rrq;
+  *p++ = 0; *p++ = 1;  // opcode: RRQ
+  const char *fn = TFTP_FILENAME;
+  while (*fn) *p++ = *fn++;
+  *p++ = 0;
+  const char *mode = "octet";
+  while (*mode) *p++ = *mode++;
+  *p++ = 0;
+  const char *opt = "blksize";
+  while (*opt) *p++ = *opt++;
+  *p++ = 0;
+  const char *val = "1024";
+  while (*val) *p++ = *val++;
+  *p++ = 0;
+
+  send_udp(server_mac, TFTP_SERVER_IP, TFTP_CLIENT_PORT, 69, rrq, p - rrq);
+  puts("TX TFTP RRQ \"" TFTP_FILENAME "\" blksize=1024\n");
+}
+
+// ---- TFTP ACK ----
+
+static void send_tftp_ack(uint16_t block) {
+  uint8_t ack[4];
+  ack[0] = 0; ack[1] = 4;  // opcode: ACK
+  ack[2] = block >> 8;
+  ack[3] = block & 0xFF;
+  send_udp(server_mac, TFTP_SERVER_IP, TFTP_CLIENT_PORT, tftp_server_port, ack, 4);
+}
+
 // ---- Send ICMP echo reply ----
 
 static void send_icmp_reply(const uint8_t *src_mac, const uint8_t *src_ip_bytes,
@@ -721,6 +871,21 @@ static void rx_poll(void) {
         putchar('\n');
         send_arp_reply(sender_mac, sender_ip);
       }
+      else if (operation == 2) {
+        // ARP reply — check if it's from our TFTP server
+        uint32_t sip = ((uint32_t)sender_ip[0] << 24) | ((uint32_t)sender_ip[1] << 16) |
+                       ((uint32_t)sender_ip[2] << 8) | sender_ip[3];
+        if (sip == TFTP_SERVER_IP && !server_mac_valid) {
+          memcpy(server_mac, sender_mac, 6);
+          server_mac_valid = true;
+          puts("  ARP: resolved server MAC ");
+          for (int i = 0; i < 6; i++) {
+            if (i) putchar(':');
+            puthex8(server_mac[i]);
+          }
+          putchar('\n');
+        }
+      }
     }
     else if (ethertype == 0x0800) {
       // ---- IPv4 ----
@@ -773,6 +938,75 @@ static void rx_poll(void) {
           putchar('\n');
           handle_dhcp(udp_data, udp_payload_len);
         }
+        else if (dst_port == TFTP_CLIENT_PORT && tftp_state == TFTP_ACTIVE) {
+          // TFTP packet
+          if (udp_payload_len < 4) continue;
+          uint16_t opcode = (udp_data[0] << 8) | udp_data[1];
+
+          if (opcode == 5) {
+            // ERROR
+            uint16_t errcode = (udp_data[2] << 8) | udp_data[3];
+            puts("TFTP ERROR ");
+            putdec(errcode);
+            puts(": ");
+            if (udp_payload_len > 4) {
+              for (uint16_t i = 4; i < udp_payload_len && udp_data[i]; i++)
+                putchar(udp_data[i]);
+            }
+            puts("\nRetrying in 30s...\n");
+            delay_ms(30000);
+            tftp_state = TFTP_IDLE;
+          }
+          else if (opcode == 6) {
+            // OACK — server accepted our options, record port, ACK block 0
+            tftp_server_port = src_port;
+            send_tftp_ack(0);
+            tftp_retry_timer = 0;
+            puts("TFTP: OACK received, blksize negotiated\n");
+          }
+          else if (opcode == 3) {
+            // DATA
+            uint16_t block = (udp_data[2] << 8) | udp_data[3];
+            uint16_t payload_len = udp_payload_len - 4;
+
+            // Record server's ephemeral port from first DATA
+            if (tftp_expected_block == 1 && block == 1)
+              tftp_server_port = src_port;
+
+            if (block == tftp_expected_block) {
+              // Copy payload to load address
+              uint8_t *dst = (uint8_t *)(TFTP_LOAD_ADDR + tftp_offset);
+              memcpy(dst, udp_data + 4, payload_len);
+              tftp_offset += payload_len;
+
+              // Send ACK
+              send_tftp_ack(block);
+              tftp_expected_block++;
+              tftp_retry_timer = 0;
+
+              // Progress every 64 blocks (~32KB)
+              if ((block & 63) == 0) {
+                puts("TFTP: ");
+                putdec(tftp_offset);
+                puts(" bytes\n");
+              }
+
+              // Last block?
+              if (payload_len < TFTP_BLOCK_SIZE) {
+                tftp_state = TFTP_DONE;
+                puts("TFTP: transfer complete, ");
+                putdec(tftp_offset);
+                puts(" bytes at 0x");
+                puthexn(TFTP_LOAD_ADDR, 8);
+                putchar('\n');
+              }
+            }
+            else if (block == tftp_expected_block - 1) {
+              // Duplicate — re-ACK
+              send_tftp_ack(block);
+            }
+          }
+        }
       }
     }
   }
@@ -790,7 +1024,7 @@ static void pr_reg(const char *name, uint8_t reg) {
 // ---- Main ----
 
 int main(void) {
-  puts("\n=== KSZ8851 Minimal DHCP (LiteX spi_wb) ===\n");
+  puts("\n=== KSZ8851 DHCP + TFTP Boot (LiteX spi_wb) ===\n");
 
   // Software reset of SPI controller (in case BIOS left it mid-transfer)
   SPI_REG(SPI_CONTROL) = (1u << 31);
@@ -915,6 +1149,66 @@ int main(void) {
         send_dhcp_packet(1 /* DISCOVER */, 0, 0);
       } else {
         dhcp_delay--;
+      }
+    }
+
+    // ---- TFTP boot state machine ----
+    if (dhcp_state == DHCP_STATE_BOUND) {
+      if (tftp_state == TFTP_IDLE) {
+        puts("\n--- TFTP boot: resolving server ");
+        print_ip(TFTP_SERVER_IP);
+        puts(" ---\n");
+        tftp_state = TFTP_ARP_WAIT;
+        tftp_retry_timer = 0;
+        tftp_retries = 0;
+        send_arp_request(TFTP_SERVER_IP);
+      }
+      else if (tftp_state == TFTP_ARP_WAIT) {
+        if (server_mac_valid) {
+          puts("Sending TFTP RRQ...\n");
+          tftp_expected_block = 1;
+          tftp_offset = 0;
+          tftp_server_port = 0;
+          tftp_state = TFTP_ACTIVE;
+          send_tftp_rrq();
+        } else if (++tftp_retry_timer >= 500000) {
+          tftp_retry_timer = 0;
+          if (++tftp_retries > 10) {
+            puts("TFTP: ARP resolve failed, giving up\n");
+            tftp_state = TFTP_DONE;  // Stop retrying
+          } else {
+            send_arp_request(TFTP_SERVER_IP);
+          }
+        }
+      }
+      else if (tftp_state == TFTP_ACTIVE) {
+        // Timeout: retransmit RRQ or last ACK
+        if (++tftp_retry_timer >= 2000000) {
+          tftp_retry_timer = 0;
+          if (++tftp_retries > 10) {
+            puts("TFTP: timeout, giving up\n");
+            tftp_state = TFTP_IDLE;
+          } else if (tftp_expected_block == 1) {
+            puts("TFTP: retransmit RRQ\n");
+            send_tftp_rrq();
+          } else {
+            puts("TFTP: retransmit ACK\n");
+            send_tftp_ack(tftp_expected_block - 1);
+          }
+        }
+      }
+      else if (tftp_state == TFTP_DONE && tftp_offset > 0) {
+        puts("\n=== Jumping to 0x");
+        puthexn(TFTP_LOAD_ADDR, 8);
+        puts(" ===\n\n");
+        delay_ms(10);  // Flush UART
+
+        typedef void (*entry_fn)(uint32_t hartid, uint32_t dtb_addr);
+        entry_fn entry = (entry_fn)TFTP_LOAD_ADDR;
+        entry(0, 0);
+        // Should not return
+        puts("FATAL: entry returned!\n");
+        while (1);
       }
     }
 
