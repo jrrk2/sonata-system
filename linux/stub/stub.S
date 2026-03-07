@@ -249,6 +249,8 @@ _start:
     li      a0, '\n'
     jal     ra, .uart_putc
 
+    /* Fall through to SRAM copier (shared with XIP path) */
+
 #else
     /* ── A/B boot selection via SELSW switches ────────────────────── */
 
@@ -350,7 +352,7 @@ _start:
 
 #endif /* TFTP_BOOT */
 
-    /* ── Continue boot ────────────────────────────────────────────── */
+    /* ── Continue boot (both TFTP and XIP paths) ─────────────────────── */
 
     /* 9. Copy kernel to PHYS_RAM_BASE via SRAM copier */
     /* t2 = src, t3 = dst, t4 = dst_end */

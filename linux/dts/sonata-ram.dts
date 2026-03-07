@@ -68,7 +68,7 @@
                 mmu-type = "riscv,sv32";
                 reg = <1>;
                 clock-frequency = <50000000>;
-                status = "okay";
+                status = "disabled";
 
                 d-cache-size = <8192>;
                 d-cache-sets = <64>;
@@ -98,9 +98,6 @@
                     core0 {
                         cpu = <&CPU0>;
                     };
-                    core1 {
-                        cpu = <&CPU1>;
-                    };
                 };
             };
 
@@ -127,9 +124,7 @@
 
             lintc0: clint@f0010000 {
                 compatible = "riscv,clint0";
-                interrupts-extended = <
-                    &L0 3 &L0 7
-                    &L1 3 &L1 7>;
+                interrupts-extended = <&L0 3 &L0 7>;
                 reg = <0xf0010000 0x10000>;
                 reg-names = "control";
             };
@@ -140,9 +135,7 @@
                 #address-cells = <0>;
                 #interrupt-cells = <1>;
                 interrupt-controller;
-                interrupts-extended = <
-                    &L0 11 &L0 9
-                    &L1 11 &L1 9>;
+                interrupts-extended = <&L0 11 &L0 9>;
                 riscv,ndev = <32>;
 
             };

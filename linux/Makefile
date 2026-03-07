@@ -36,6 +36,7 @@ REPO_ROOT    := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 CONFIG_DIR   := $(REPO_ROOT)/config
 DTS_DIR      := $(REPO_ROOT)/dts
+DRIVERS_DIR  := $(REPO_ROOT)/drivers
 SDCARD_DIR   := $(REPO_ROOT)/sdcard
 STUB_DIR     := $(REPO_ROOT)/stub
 
@@ -81,7 +82,14 @@ FLASHXIP     := $(OUT)/flashxip.bin
 FLASH_AB     := $(OUT)/flash.bin
 BOOT_JSON    := $(OUT)/boot.json
 
-.PHONY: all clean kernel-clean opensbi-clean sdcard setup help
+# ── RAM kernel (TFTP boot) ───────────────────────────────────────────
+
+KERNEL_RAM_CONFIG := $(CONFIG_DIR)/ram-additions.config
+RAM_DTS          := $(DTS_DIR)/sonata-ram.dts
+RAM_IMAGE        := $(LINUX_SRC)/arch/riscv/boot/Image
+KERNEL_RAM_BIN   := $(OUT)/kernel.bin
+
+.PHONY: all clean kernel-clean opensbi-clean sdcard setup help kernel-ram
 
 all: $(FLASHXIP) $(DTB) $(XIPJUMP) $(BOOT_JSON)
 
@@ -219,6 +227,65 @@ setup:
 	fi
 	@echo "=== Setup complete ==="
 	@echo "Trees at: $(LINUX_SRC) $(OPENSBI_SRC)"
+
+# ── RAM kernel (TFTP boot) ────────────────────────────────────────────
+#
+# Builds a non-XIP RAM kernel for TFTP boot:
+#   1. Copy patched drivers + DTS into kernel tree
+#   2. tinyconfig + ram-additions.config → Image
+#   3. 4KB stub (with -DTFTP_BOOT) + Image = out/kernel.bin
+#
+# The M-mode stub copies the kernel from load address (0x40201000) to
+# PHYS_RAM_BASE (0x40000000) via the SRAM copier, then mrets to S-mode.
+
+$(RAM_IMAGE): $(KERNEL_RAM_CONFIG) $(RAM_DTS) | $(OUT)
+	@echo "=== Building RAM Image ==="
+	@# Copy patched drivers into kernel tree
+	cp $(DRIVERS_DIR)/spi/spi-opentitan.c $(LINUX_SRC)/drivers/spi/
+	cp $(DRIVERS_DIR)/net/ethernet/micrel/ks8851_common.c $(LINUX_SRC)/drivers/net/ethernet/micrel/
+	cp $(DRIVERS_DIR)/net/ethernet/micrel/ks8851.h $(LINUX_SRC)/drivers/net/ethernet/micrel/
+	cp $(DRIVERS_DIR)/net/ethernet/micrel/ks8851_spi.c $(LINUX_SRC)/drivers/net/ethernet/micrel/
+	@# Copy DTS for built-in DTB
+	cp $(RAM_DTS) $(LINUX_SRC)/arch/riscv/boot/dts/litex/sonata-ram.dts
+	@# Compile DTB for embedding
+	dtc -I dts -O dtb -o /tmp/sonata-ram.dtb $(RAM_DTS) 2>/dev/null
+	base64 /tmp/sonata-ram.dtb > $(LINUX_SRC)/arch/riscv/boot/dts/litex/sonata-ram.dtb.b64
+	rm -f /tmp/sonata-ram.dtb
+	@# Configure
+	cd $(LINUX_SRC) && \
+		$(MAKE) ARCH=riscv CROSS_COMPILE=$(CROSS) $(KERNEL_TINYCONFIG) && \
+		scripts/kconfig/merge_config.sh -m .config $(KERNEL_RAM_CONFIG) && \
+		scripts/config --set-val CONFIG_MISC_FILESYSTEMS y && \
+		scripts/config --set-val CONFIG_MTD_ROM y && \
+		scripts/config --enable CONFIG_BUILTIN_DTB && \
+		scripts/config --set-str CONFIG_BUILTIN_DTB_SOURCE "litex/sonata-ram" && \
+		$(MAKE) ARCH=riscv CROSS_COMPILE=$(CROSS) olddefconfig
+	@# Verify critical options
+	@grep -q 'CONFIG_BUILTIN_DTB=y' $(LINUX_SRC)/.config || \
+		{ echo "ERROR: BUILTIN_DTB not set!"; exit 1; }
+	@grep -qv 'CONFIG_XIP_KERNEL=y' $(LINUX_SRC)/.config || \
+		{ echo "ERROR: XIP_KERNEL should NOT be set for RAM kernel!"; exit 1; }
+	@# Build
+	cd $(LINUX_SRC) && \
+		$(MAKE) ARCH=riscv CROSS_COMPILE=$(CROSS) -j$$(nproc) Image
+	@echo "=== RAM Image ready: $@ ==="
+
+$(KERNEL_RAM_BIN): $(RAM_IMAGE) $(STUB_DIR)/stub.S $(STUB_DIR)/stub.ld | $(OUT)
+	@echo "=== Building kernel.bin (stub + Image) ==="
+	$(CROSS)gcc -nostdlib -nostartfiles -DTFTP_BOOT \
+		-T $(STUB_DIR)/stub.ld -Wl,--build-id=none \
+		-o $(OUT)/stub.elf $(STUB_DIR)/stub.S
+	$(CROSS)objcopy -O binary $(OUT)/stub.elf $(OUT)/stub.bin
+	cp $(OUT)/stub.bin $@
+	truncate -s 4096 $@
+	cat $(RAM_IMAGE) >> $@
+	@echo "--- Verify ---"
+	@ls -la $@
+	@hexdump -C $@ | head -1
+	@hexdump -C $@ -s 0x1000 -n 16
+	@echo "=== kernel.bin ready ==="
+
+kernel-ram: $(KERNEL_RAM_BIN)
 
 # ── Clean ─────────────────────────────────────────────────────────────
 
