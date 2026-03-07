@@ -26,13 +26,14 @@ SHELL := /bin/bash
 
 # ── Paths ──────────────────────────────────────────────────────────────
 
-LITEX_BASE   := /home/jonathan/litex-sonata
-BUILDROOT    := $(LITEX_BASE)/buildroot/output
-CROSS        := $(BUILDROOT)/host/bin/riscv32-buildroot-linux-musl-
-
-LINUX_SRC    := /home/jonathan/linux-xip
-OPENSBI_SRC  := /home/jonathan/opensbi-xip
 REPO_ROOT    := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+LITEX_BASE   ?= $(REPO_ROOT)/../../litex-sonata
+BUILDROOT    := $(LITEX_BASE)/buildroot/output
+CROSS        ?= $(BUILDROOT)/host/bin/riscv32-buildroot-linux-musl-
+
+LINUX_SRC    ?= $(REPO_ROOT)/../../linux-xip
+OPENSBI_SRC  ?= $(REPO_ROOT)/../../opensbi-xip
 
 CONFIG_DIR   := $(REPO_ROOT)/config
 DTS_DIR      := $(REPO_ROOT)/dts
