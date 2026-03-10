@@ -36,8 +36,8 @@
 #define SONATA_SOC_CTRL_SIZE  0x0000000c
 
 /* SPI Flash controller (LiteX spiflash CSR for read/write/erase) */
-#define SONATA_SPIFLASH_BASE  0xf0004000
-#define SONATA_SPIFLASH_SIZE  0x00000100
+#define SONATA_SPIFLASH_BASE  0xf0003800
+#define SONATA_SPIFLASH_SIZE  0x00000018
 
 /* SPI Flash — memory-mapped XIP region */
 #define SONATA_FLASH_BASE     0x02000000
@@ -72,7 +72,7 @@
 #define SONATA_LED_NGPIO      4
 
 /* GPIO — buttons/switches (input) */
-#define SONATA_BTN_BASE       0xf0004800
+#define SONATA_BTN_BASE       0xf0004000
 #define SONATA_BTN_SIZE       0x04
 #define SONATA_BTN_IRQ        4
 #define SONATA_BTN_NGPIO      4
